@@ -3,7 +3,7 @@
 Plataforma modular de Seguridad de la Información y Ciberseguridad.
 Stack: Next.js · FastAPI · PostgreSQL · Redis · Nginx · Docker Compose · GitHub Actions.
 
-> Estado: **Fase 1 (infraestructura) implementada.** Sin lógica de negocio todavía.
+> Estado: **Fases 1 (infraestructura) y 2 (fundamentos: migraciones, auditoría fail-closed, errores) implementadas.** Sin lógica de negocio todavía.
 > El diseño técnico (PROPUESTO, pendiente de validación) está en [`docs/`](docs/00-README.md).
 
 ## Requisitos
@@ -25,10 +25,18 @@ Abrir: <http://127.0.0.1:8080>. Solo Nginx publica un puerto, y solo en `127.0.0
 | Levantar en desarrollo (recarga en caliente, docs en `/api/v1/docs`, BD en `127.0.0.1:5432`) | `make up-dev` |
 | Detener (conserva datos) | `make down` / `make down-dev` |
 | Estado / logs | `make ps` / `make logs` |
-| Lint y pruebas del backend | `make lint` / `make test` |
+| Lint y pruebas del backend | `make lint` / `make test` (unitarias) / `make test-int` (integración, PostgreSQL real) |
+| Aplicar migraciones manualmente | `make migrate` (también se ejecutan solas en `make up`) |
+| Verificar integridad de la auditoría | `make audit-verify` |
+| Volcar incidentes de auditoría pendientes | `docker compose exec backend python -m app.cli flush-incidents` |
 | Ambiente de pruebas aislado (puerto 8081, datos efímeros) | `make test-stack` y luego `make test-stack-down` |
 
 **Borrar todos los datos locales** (irreversible): `docker compose down -v`.
+
+## Base de datos
+- `POSTGRES_USER` (owner): solo lo usan PostgreSQL y el servicio `migrate`.
+- `APP_DB_USER` (runtime): lo crea `migrate`; es el único rol que usa el backend. No puede hacer DDL ni borrados físicos, y en la auditoría solo puede insertar y leer.
+- Esquemas: `app` (negocio), `audit` (bitácora inmutable con cadena de hash) y `ops` (errores).
 
 ## Secretos
 - `.env` lo genera `scripts/init-env.sh` con contraseñas aleatorias y permisos `600`. No se versiona.
@@ -45,4 +53,4 @@ docs/        Diseño técnico, especificaciones y fases
 ```
 
 ## Pendiente en fases siguientes
-Migraciones (Fase 2) · bootstrap de administradores y autenticación (Fase 3) · respaldo y restauración (Fase 10) · TLS local (PD-20).
+Bootstrap de administradores y autenticación (Fase 3) · respaldo y restauración (Fase 10) · TLS local (PD-20).

@@ -31,7 +31,7 @@ def test_formatter_redacts_message():
 
 
 def test_settings_secrets_not_in_repr():
-    s = Settings(postgres_db="d", postgres_user="u", postgres_password="p@ss/w0rd",
+    s = Settings(postgres_db="d", app_db_user="u", app_db_password="p@ss/w0rd",
                  redis_password="r3dis")
     assert "p@ss/w0rd" not in repr(s)
     assert "r3dis" not in repr(s)

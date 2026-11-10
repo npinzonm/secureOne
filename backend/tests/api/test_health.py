@@ -15,7 +15,7 @@ async def _fail(_settings) -> None:
 
 
 def _client(checks) -> TestClient:
-    app = create_app()
+    app = create_app(with_lifespan=False)
     app.dependency_overrides[get_checks] = lambda: checks
     return TestClient(app)
 
@@ -28,9 +28,24 @@ def test_live_returns_ok():
 
 
 def test_ready_ok_when_all_dependencies_ok():
-    r = _client({"postgres": _ok, "redis": _ok}).get("/api/v1/health/ready")
+    r = _client({"postgres": _ok, "redis": _ok, "migrations": _ok}).get("/api/v1/health/ready")
     assert r.status_code == 200
-    assert r.json() == {"status": "ok", "checks": {"postgres": "ok", "redis": "ok"}}
+    assert r.json() == {
+        "status": "ok",
+        "checks": {"postgres": "ok", "redis": "ok", "migrations": "ok"},
+    }
+
+
+def test_ready_503_when_migrations_pending():
+    r = _client({"postgres": _ok, "redis": _ok, "migrations": _fail}).get("/api/v1/health/ready")
+    assert r.status_code == 503
+    assert r.json()["checks"]["migrations"] == "fail"
+
+
+def test_migrations_head_is_resolvable():
+    from app.api.health import migrations_head
+
+    assert migrations_head() == "0001"
 
 
 def test_ready_503_when_postgres_down():
