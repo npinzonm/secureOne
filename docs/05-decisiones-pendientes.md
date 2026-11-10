@@ -10,6 +10,7 @@
 | PD-01 | Access JWT de 5 min con `sid`; sesión viva en Redis con TTL deslizante de 15 min; una sesión por usuario; refresh opaco rotativo con hash en PostgreSQL y detección de reutilización; Redis caído → 503. | 2026-11-09 | Responsable del proyecto (chat) |
 | PD-04 | Fail-closed para toda mutación, todo evento de autenticación (incluido el login), consultas sensibles y exportaciones. Sin auditoría, nadie inicia sesión. | 2026-11-09 | Responsable del proyecto (chat) |
 | PD-06 | Perfil de sistema protegido `ADMINISTRADOR` con rol que contiene todos los permisos `ADM.*`; máximo 2 usuarios activos. | 2026-11-09 | Responsable del proyecto (chat) |
+| PD-05 | Matriz de operaciones de [ESP-APR §2](especificaciones/ESP-APR.md#2-matriz-de-operaciones-propuesta--pd-05). **Con aprobación:** alta, modificación agrupada de datos, cambio de perfil, asignación/revocación de módulos, inhabilitación manual y reactivación de usuarios; inhabilitación por retiro TH. **Directas:** orden de módulos, contraseña temporal, revocación de sesión, gestión de perfiles/roles/permisos/módulos con impacto previo, dominios, parámetros, estado de atención de errores y carga de archivo TH. | 2026-11-10 | Responsable del proyecto (chat) |
 | PD-17 | Mensaje genérico «Usuario o contraseña inválidos» para cualquier fallo; mensaje específico solo para el bloqueo temporal, sin indicar minutos. | 2026-11-09 | Responsable del proyecto (chat) |
 
 Las secciones de estas decisiones más abajo se conservan como justificación; su estado es **APROBADO**.

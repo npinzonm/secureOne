@@ -56,4 +56,6 @@ def require_session(
         token = creds.credentials if creds and creds.scheme.lower() == "bearer" else None
         return await auth.authenticate(token, allow_restricted=allow_restricted, touch=touch)
 
+    # Marca para la meta-prueba T-SEC-00 (toda ruta no pública declara una guarda).
+    dependency.__secureone_session__ = True  # type: ignore[attr-defined]
     return dependency

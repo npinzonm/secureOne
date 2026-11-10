@@ -20,6 +20,8 @@ from app.kernel.error_registry import classify, record_error
 from app.modules.auth.api.router import router as auth_router
 from app.modules.auth.application.service import AuthService
 from app.modules.auth.infrastructure.session_store import SessionStore
+from app.modules.iam.api.router import router as iam_router
+from app.modules.users.api.router import router as users_router
 
 API_PREFIX = "/api/v1"
 _CID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
@@ -80,7 +82,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     is_dev = settings.app_env == "dev"
     app = FastAPI(
         title="SecureOne API",
-        version="0.3.0",
+        version="0.4.0",
         docs_url=f"{API_PREFIX}/docs" if is_dev else None,
         redoc_url=None,
         openapi_url=f"{API_PREFIX}/openapi.json" if is_dev else None,
@@ -111,6 +113,8 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     install_error_handlers(app, on_unhandled=_record_unhandled)
     app.include_router(health.router, prefix=API_PREFIX)
     app.include_router(auth_router, prefix=API_PREFIX)
+    app.include_router(iam_router, prefix=API_PREFIX)
+    app.include_router(users_router, prefix=API_PREFIX)
     return app
 
 

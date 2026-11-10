@@ -125,11 +125,19 @@ async def bootstrap_admin(
             {"u": uid, "h": pwd_hash},
         )
         await repo.add_password_history(s, uid, pwd_hash, settings.password_history)
+        # Fase 4: el administrador recibe el módulo Administración (sus permisos llegan
+        # por perfil → rol ADMINISTRADOR_TOTAL → ADM.*; la asignación solo habilita el módulo).
+        await s.execute(
+            text("INSERT INTO app.usuario_modulo (usuario_id, modulo_id) "
+                 "SELECT :u, id FROM app.modulo WHERE codigo = 'ADM'"),
+            {"u": uid},
+        )
         uow.audit(AuditEntry(
             categoria="AUTENTICACION", accion="AUTH_BOOTSTRAP", modulo="ADM",
             entidad="usuario", entidad_id=str(uid),
             valor_nuevo={"usuario_red": d.usuario_red, "perfil": "ADMINISTRADOR",
-                         "estado": "ACTIVO", "debe_cambiar_contrasena": True},
+                         "estado": "ACTIVO", "modulos": ["ADM"],
+                         "debe_cambiar_contrasena": True},
         ))
         try:
             await uow.commit()
