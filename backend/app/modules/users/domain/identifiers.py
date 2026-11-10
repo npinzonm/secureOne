@@ -21,3 +21,9 @@ def is_valid_usuario_red(normalized: str) -> bool:
 
 def is_valid_identificacion(value: str) -> bool:
     return bool(IDENTIFICACION_RE.match(value))
+
+EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
+
+
+def is_valid_email(value: str) -> bool:
+    return len(value) <= 150 and bool(EMAIL_RE.match(value))

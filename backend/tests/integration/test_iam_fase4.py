@@ -1,5 +1,6 @@
 """Integración Fase 4: permisos efectivos, guarda de autorización (batería T-SEC) y consultas."""
 
+import re
 import uuid
 from contextlib import contextmanager
 
@@ -31,30 +32,37 @@ def client():
         yield c
 
 
-def protected_admin_routes() -> list[tuple[str, str]]:
-    """Todas las rutas GET protegidas por permiso (con ids de ejemplo)."""
+def protected_admin_routes() -> list[tuple[str, str, str]]:
+    """Todas las rutas /admin (todos los métodos), con ids de ejemplo: (método, ruta, permiso).
+
+    La guarda se resuelve antes que el cuerpo, así que un cuerpo vacío basta para 401/403.
+    """
     out = []
     for r in create_app(with_lifespan=False).routes:
-        if isinstance(r, APIRoute) and "GET" in r.methods and r.path.startswith("/api/v1/admin/"):
+        if isinstance(r, APIRoute) and r.path.startswith("/api/v1/admin/"):
             stack, perm = list(r.dependant.dependencies), None
             while stack:
                 d = stack.pop()
                 perm = perm or getattr(d.call, "__secureone_permission__", None)
                 stack.extend(d.dependencies)
-            out.append((r.path.replace("{user_id}", str(uuid.uuid4())), perm))
-    assert len(out) >= 10
+            path = re.sub(r"\{[a-z_]+\}", str(uuid.uuid4()), r.path)
+            for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
+                out.append((m, path, perm))
+    assert len(out) >= 40
     return out
 
 
 ROUTES = protected_admin_routes()
+GET_ROUTES = [(m, p, perm) for m, p, perm in ROUTES if m == "GET"]
 
 
 def assert_all(client, headers, expected: int, code: str | None = None):
-    for path, _ in ROUTES:
-        r = client.get(path, headers=headers)
-        assert r.status_code == expected, (path, r.status_code, r.text)
+    for method, path, _ in ROUTES:
+        r = client.request(method, path, headers=headers,
+                           json=None if method == "GET" else {})
+        assert r.status_code == expected, (method, path, r.status_code, r.text)
         if code:
-            assert r.json()["error"]["code"] == code, (path, r.text)
+            assert r.json()["error"]["code"] == code, (method, path, r.text)
 
 
 @contextmanager
@@ -129,7 +137,7 @@ def test_admin_has_all_adm_permissions(client, owner):
     total = owner.execute(
         "SELECT count(*) FROM app.permiso WHERE codigo LIKE 'ADM.%'").fetchone()[0]
     assert len(perms) == total == len(set(perms))
-    for path, _ in ROUTES:
+    for _, path, _ in GET_ROUTES:
         r = client.get(path, headers=bearer(tok))
         assert r.status_code in (200, 404), (path, r.text)  # 404: id de ejemplo inexistente
 

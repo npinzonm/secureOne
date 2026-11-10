@@ -3,7 +3,7 @@
 Plataforma modular de Seguridad de la Información y Ciberseguridad.
 Stack: Next.js · FastAPI · PostgreSQL · Redis · Nginx · Docker Compose · GitHub Actions.
 
-> Estado: **Fases 1–4 implementadas** (infraestructura, fundamentos, autenticación y sesiones, IAM con autorización por operación y consultas administrativas). Las operaciones administrativas que modifican datos llegan en la Fase 5.
+> Estado: **Fases 1–5 implementadas**: infraestructura, fundamentos, autenticación, IAM con autorización por operación y operaciones administrativas según la matriz PD-05 (directas aplicadas; las que requieren aprobación crean la solicitud). Aprobar y aplicar solicitudes llega en la Fase 6.
 > El diseño técnico (PROPUESTO, pendiente de validación) está en [`docs/`](docs/00-README.md).
 
 ## Requisitos
@@ -74,4 +74,4 @@ docs/        Diseño técnico, especificaciones y fases
 ```
 
 ## Pendiente en fases siguientes
-Operaciones administrativas y aprobaciones (Fases 5–6, requieren PD-05) · respaldo y restauración (Fase 10) · TLS local (PD-20).
+Aprobación y aplicación de solicitudes (Fase 6) · auditoría/notificaciones (Fase 7) · respaldo y restauración (Fase 10) · TLS local (PD-20).
