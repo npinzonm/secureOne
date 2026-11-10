@@ -3,6 +3,17 @@
 > Cada decisión lleva una recomendación. **Ninguna está aprobada** hasta que el responsable la valide.
 > **Bloquea** = fase o funcionalidad que no se implementa sin la respuesta. Si dice "no bloquea", se implementará la recomendación como PROPUESTA, de forma reversible, salvo indicación contraria.
 
+## Registro de decisiones aprobadas
+
+| ID | Decisión aprobada | Fecha | Aprobó |
+|---|---|---|---|
+| PD-01 | Access JWT de 5 min con `sid`; sesión viva en Redis con TTL deslizante de 15 min; una sesión por usuario; refresh opaco rotativo con hash en PostgreSQL y detección de reutilización; Redis caído → 503. | 2026-11-09 | Responsable del proyecto (chat) |
+| PD-04 | Fail-closed para toda mutación, todo evento de autenticación (incluido el login), consultas sensibles y exportaciones. Sin auditoría, nadie inicia sesión. | 2026-11-09 | Responsable del proyecto (chat) |
+| PD-06 | Perfil de sistema protegido `ADMINISTRADOR` con rol que contiene todos los permisos `ADM.*`; máximo 2 usuarios activos. | 2026-11-09 | Responsable del proyecto (chat) |
+| PD-17 | Mensaje genérico «Usuario o contraseña inválidos» para cualquier fallo; mensaje específico solo para el bloqueo temporal, sin indicar minutos. | 2026-11-09 | Responsable del proyecto (chat) |
+
+Las secciones de estas decisiones más abajo se conservan como justificación; su estado es **APROBADO**.
+
 ## Resumen y prioridad de respuesta
 
 | ID | Tema | Bloquea | Prioridad de respuesta |

@@ -11,6 +11,10 @@ services:
       APP_ENV: test
       RUFF_CACHE_DIR: /tmp/ruff
       PYTHONPYCACHEPREFIX: /tmp/pycache
+      # SOLO en el ambiente de pruebas: credenciales owner para que las pruebas de integración
+      # preparen tablas de prueba y simulen manipulación/caída de la auditoría.
+      TEST_OWNER_USER: ${POSTGRES_USER:?POSTGRES_USER requerido}
+      TEST_OWNER_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requerido}
   postgres:
     volumes: !override
       - type: tmpfs

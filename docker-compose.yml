@@ -44,14 +44,39 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       POSTGRES_HOST: postgres
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB requerido}
-      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER requerido}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requerido}
+      # El backend usa SOLO el rol de runtime; nunca las credenciales owner.
+      APP_DB_USER: ${APP_DB_USER:?APP_DB_USER requerido}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD requerido}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD requerido}
+    volumes:
+      - spool:/var/lib/secureone/spool
     depends_on:
-      postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     networks: [edge, data]
+
+  # Ejecución única: crea/actualiza el rol de runtime y aplica migraciones (owner).
+  migrate:
+    image: secureone/backend:local
+    build: { context: ./backend, target: runtime }
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    read_only: true
+    tmpfs: ["/tmp"]
+    command: ["python", "-m", "app.cli", "migrate"]
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB requerido}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER requerido}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requerido}
+      APP_DB_USER: ${APP_DB_USER:?APP_DB_USER requerido}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD requerido}
+    healthcheck: { disable: true }
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [data]
 
   postgres:
     <<: *hardening
@@ -94,3 +119,4 @@ networks:
 volumes:
   pgdata: {}
   redisdata: {}
+  spool: {}

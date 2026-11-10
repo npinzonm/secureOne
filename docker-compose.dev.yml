@@ -12,6 +12,8 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
+      - ./backend/migrations:/app/migrations
+      - spool:/var/lib/secureone/spool
 
   frontend:
     build: { context: ./frontend, target: dev }

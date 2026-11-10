@@ -10,7 +10,10 @@ RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app 
 FROM base AS runtime
 COPY requirements.txt .
 RUN pip install -r requirements.txt
+COPY alembic.ini ./
+COPY migrations ./migrations
 COPY app ./app
+RUN mkdir -p /var/lib/secureone/spool && chown app:app /var/lib/secureone/spool
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \

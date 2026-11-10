@@ -19,7 +19,7 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -r requirements-dev.txt
       - run: ruff check app tests
-      - run: pytest
+      - run: pytest -m "not integration"
 
   frontend:
     runs-on: ubuntu-latest
@@ -40,7 +40,11 @@ jobs:
       - run: ./scripts/init-env.sh
       - run: docker compose up -d --build --wait
       - run: ./scripts/smoke.sh
+      - run: make test-int
+      - run: docker compose exec -T backend python -m app.cli audit-verify
       - if: failure()
         run: docker compose logs --no-color
       - if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v
+          docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml down -v
