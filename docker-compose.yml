@@ -51,12 +51,67 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD requerido}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requerido}
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-secureone@localhost.test}
     volumes:
       - spool:/var/lib/secureone/spool
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
     networks: [edge, data]
+
+  # Worker: entregas de notificaciones, reintentos, spool de auditoría y sesiones abandonadas.
+  worker:
+    <<: *hardening
+    image: secureone/backend:local
+    build: { context: ./backend, target: runtime }
+    read_only: true
+    tmpfs: ["/tmp"]
+    command: ["python", "-m", "app.worker"]
+    environment:
+      APP_ENV: ${APP_ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB requerido}
+      APP_DB_USER: ${APP_DB_USER:?APP_DB_USER requerido}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD requerido}
+      REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD requerido}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requerido}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_FROM: ${SMTP_FROM:-secureone@localhost.test}
+    volumes:
+      - spool:/var/lib/secureone/spool
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.worker", "healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      mailpit: { condition: service_healthy }
+    networks: [data, mail]
+
+  # SMTP local del prototipo (v1.0 sin integraciones corporativas obligatorias; PD-11).
+  # UI solo en 127.0.0.1:8025.
+  mailpit:
+    <<: *hardening
+    image: axllent/mailpit:v1.21.8
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    ports:
+      - "127.0.0.1:${MAILPIT_UI_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [mail]
 
   # Ejecución única: crea/actualiza el rol de runtime y aplica migraciones (owner).
   migrate:
@@ -115,6 +170,7 @@ services:
 
 networks:
   edge: {}
+  mail: {}
   data:
     internal: true   # postgres y redis sin salida ni acceso desde fuera de la red
 

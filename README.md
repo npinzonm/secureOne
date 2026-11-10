@@ -3,7 +3,7 @@
 Plataforma modular de Seguridad de la Información y Ciberseguridad.
 Stack: Next.js · FastAPI · PostgreSQL · Redis · Nginx · Docker Compose · GitHub Actions.
 
-> Estado: **Fases 1–6 implementadas**: infraestructura, fundamentos, autenticación, IAM con autorización por operación, operaciones administrativas (matriz PD-05) y resolución de solicitudes (aprobación única con autoaprobación, rechazo y cancelación con motivo, aplicación atómica e historial).
+> Estado: **Fases 1–7 implementadas**: infraestructura, fundamentos, autenticación, IAM, operaciones administrativas (PD-05), resolución de solicitudes, auditoría consultable/exportable, registro de errores, notificaciones (bandeja + correo) y worker en segundo plano.
 > El diseño técnico (PROPUESTO, pendiente de validación) está en [`docs/`](docs/00-README.md).
 
 ## Requisitos
@@ -15,7 +15,7 @@ Stack: Next.js · FastAPI · PostgreSQL · Redis · Nginx · Docker Compose · G
 make up          # genera .env con secretos aleatorios (si no existe) y levanta el stack
 make health      # smoke test: frontend, API, readiness y cabeceras
 ```
-Abrir: <http://127.0.0.1:8080>. Solo Nginx publica un puerto, y solo en `127.0.0.1`.
+Abrir: <http://127.0.0.1:8080>. Nginx publica el único puerto de la aplicación (solo en `127.0.0.1`). Mailpit (SMTP local del prototipo) expone su UI en <http://127.0.0.1:8025> para revisar los correos enviados.
 
 ## Operación diaria
 
@@ -54,6 +54,16 @@ make bootstrap-admin
 
 La sesión se cierra tras 15 min sin actividad; solo hay una sesión activa por usuario; al 5.º intento fallido la cuenta queda bloqueada 15 min.
 
+## Servicios
+| Servicio | Función |
+|---|---|
+| `nginx` | Proxy inverso (único puerto de la aplicación) |
+| `frontend` / `backend` | Next.js / FastAPI |
+| `migrate` | Ejecución única: rol de runtime + migraciones |
+| `worker` | Entrega de notificaciones (reintentos 1/5/15/60 min), volcado de incidentes de auditoría y cierre de sesiones abandonadas |
+| `postgres` / `redis` | Datos / sesiones vivas |
+| `mailpit` | SMTP local del prototipo (UI 127.0.0.1:8025) |
+
 ## Base de datos
 - `POSTGRES_USER` (owner): solo lo usan PostgreSQL y el servicio `migrate`.
 - `APP_DB_USER` (runtime): lo crea `migrate`; es el único rol que usa el backend. No puede hacer DDL ni borrados físicos, y en la auditoría solo puede insertar y leer.
@@ -74,4 +84,4 @@ docs/        Diseño técnico, especificaciones y fases
 ```
 
 ## Pendiente en fases siguientes
-Auditoría consultable y notificaciones (Fase 7) · integración TH (Fase 8, requiere PD-09) · respaldo y restauración (Fase 10) · TLS local (PD-20).
+Integración TH (Fase 8, requiere PD-09) · frontend (Fase 9) · respaldo y restauración (Fase 10) · TLS local (PD-20).

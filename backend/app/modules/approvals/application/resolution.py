@@ -23,6 +23,7 @@ from app.modules.auth.infrastructure import repository as auth_repo
 from app.modules.auth.infrastructure.hashing import hash_password
 from app.modules.auth.infrastructure.session_store import SessionStore
 from app.modules.iam.application.associations import set_active
+from app.modules.notifications.application.outbox import notify, request_context
 from app.modules.users.application.validators import (
     active_admins,
     active_id,
@@ -256,6 +257,8 @@ async def approve(uow: UnitOfWork, rid: uuid.UUID, approver: uuid.UUID, settings
         detalle={"numero": sol["numero"], "tipo": tipo, "solicitante": str(sol["solicitante_id"]),
                  "aprobador": str(approver),
                  "autoaprobacion": sol["solicitante_id"] == approver}))
+    await notify(uow, "APR_APPROVED", str(rid),
+                 await request_context(uow.session, rid, uow.ctx.actor_usuario_red))
     return Resolution(rid, sol["numero"], tipo, "APROBADA", u["id"], temp)
 
 
@@ -274,6 +277,8 @@ async def reject_or_cancel(uow: UnitOfWork, rid: uuid.UUID, actor: uuid.UUID, mo
         categoria=CAT, accion="APR_REJECTED" if estado == "RECHAZADA" else "APR_CANCELLED",
         modulo="ADM", entidad="solicitud", entidad_id=str(rid), solicitud_id=rid, motivo=motivo,
         detalle={"numero": sol["numero"], "tipo": sol["tipo"]}))
+    await notify(uow, "APR_REJECTED" if estado == "RECHAZADA" else "APR_CANCELLED", str(rid),
+                 await request_context(uow.session, rid, uow.ctx.actor_usuario_red))
     return Resolution(rid, sol["numero"], sol["tipo"], estado, sol["entidad_id"])
 
 

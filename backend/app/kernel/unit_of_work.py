@@ -14,6 +14,7 @@ Garantías:
 """
 
 import logging
+from collections.abc import Awaitable, Callable
 from types import TracebackType
 
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
@@ -32,15 +33,19 @@ class MissingAuditError(RuntimeError):
 class UnitOfWork:
     def __init__(
         self,
-        sessionmaker: async_sessionmaker[AsyncSession],
+        sessionmaker: async_sessionmaker[AsyncSession],  # también accesible como .sessionmaker
         ctx: AuditContext,
         spool: IncidentSpool,
     ) -> None:
         self._sessionmaker = sessionmaker
+        self.sessionmaker = sessionmaker
         self.ctx = ctx
         self._spool = spool
         self._pending: list[AuditEntry] = []
         self._committed = False
+        # Acciones best-effort tras un commit exitoso (p. ej. registrar que falló la generación
+        # de una notificación): nunca afectan a la operación ya confirmada.
+        self.after_commit: list[Callable[[], Awaitable[None]]] = []
         self.session: AsyncSession
 
     async def __aenter__(self) -> "UnitOfWork":
@@ -88,3 +93,8 @@ class UnitOfWork:
             await self.session.rollback()
             raise ServiceUnavailableError() from exc
         self._committed = True
+        for action in self.after_commit:
+            try:
+                await action()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("acción posterior al commit falló (%s)", type(exc).__name__)

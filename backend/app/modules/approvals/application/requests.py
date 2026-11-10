@@ -16,6 +16,7 @@ from app.core.errors import BusinessRuleError, ConflictError
 from app.core.ids import uuid7
 from app.kernel.audit import AuditEntry
 from app.kernel.unit_of_work import UnitOfWork
+from app.modules.notifications.application.outbox import notify, request_context
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,9 @@ async def create_request(
         detalle={"numero": numero, "tipo": tipo, "entidad": entidad,
                  "entidad_id": str(entidad_id)},
     ))
+    # REQ-APR-08: ambos administradores reciben la notificación (outbox, D-NOT-001).
+    actor = uow.ctx.actor_usuario_red or ("Talento Humano" if origen == "TH" else None)
+    await notify(uow, "APR_REQUEST_CREATED", str(rid), await request_context(s, rid, actor))
     return CreatedRequest(rid, numero, tipo)
 
 

@@ -10,10 +10,12 @@ from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from app.core.errors import NotFoundError
+from app.core.excel import MAX_EXPORT_ROWS, build_xlsx, xlsx_response
 from app.kernel.audit import AuditEntry
 from app.kernel.authz import require
 from app.kernel.unit_of_work import UnitOfWork
@@ -70,42 +72,54 @@ def _like(value: str) -> str:
     return f"%{escaped}%"
 
 
+class UserFilter(BaseModel):
+    """Filtros aprobados de la consulta central (P §6.1, REQ-USER-10)."""
+
+    model_config = ConfigDict(extra="forbid")
+    nombre: str | None = Field(None, max_length=100, description="Nombre o apellidos")
+    usuario_red: str | None = Field(None, max_length=16)
+    identificacion: str | None = Field(None, max_length=20)
+    correo: str | None = Field(None, max_length=150)
+    gerencia_id: uuid.UUID | None = None
+    area_id: uuid.UUID | None = None
+    cargo_id: uuid.UUID | None = None
+    estado: Literal["PENDIENTE_ALTA", "ACTIVO", "INACTIVO"] | None = None
+    tipo_alta: Literal["NORMAL", "EXCEPCIONAL"] | None = None
+
+    def sql(self) -> tuple[str, dict[str, Any]]:
+        where = """
+         WHERE (CAST(:nombre AS text) IS NULL
+                OR (u.nombre || ' ' || u.primer_apellido || ' ' || coalesce(u.segundo_apellido, ''))
+                   ILIKE :nombre)
+           AND (CAST(:red AS text) IS NULL OR u.usuario_red ILIKE :red)
+           AND (CAST(:ident AS text) IS NULL OR u.identificacion ILIKE :ident)
+           AND (CAST(:correo AS text) IS NULL OR u.correo ILIKE :correo)
+           AND (CAST(:g AS uuid) IS NULL OR u.gerencia_id = :g)
+           AND (CAST(:a AS uuid) IS NULL OR u.area_id = :a)
+           AND (CAST(:c AS uuid) IS NULL OR u.cargo_id = :c)
+           AND (CAST(:estado AS text) IS NULL OR u.estado = :estado)
+           AND (CAST(:tipo AS text) IS NULL OR u.tipo_alta = :tipo)
+        """
+        params = {
+            "nombre": _like(self.nombre) if self.nombre else None,
+            "red": _like(self.usuario_red.strip().lower()) if self.usuario_red else None,
+            "ident": _like(self.identificacion) if self.identificacion else None,
+            "correo": _like(self.correo) if self.correo else None,
+            "g": self.gerencia_id, "a": self.area_id, "c": self.cargo_id,
+            "estado": self.estado, "tipo": self.tipo_alta,
+        }
+        return where, params
+
+
 @router.get("/admin/users", response_model=UsuariosPage)
 async def list_users(
-    nombre: str | None = Query(None, max_length=100, description="Nombre o apellidos"),
-    usuario_red: str | None = Query(None, max_length=16),
-    identificacion: str | None = Query(None, max_length=20),
-    correo: str | None = Query(None, max_length=150),
-    gerencia_id: uuid.UUID | None = None,
-    area_id: uuid.UUID | None = None,
-    cargo_id: uuid.UUID | None = None,
-    estado: Literal["PENDIENTE_ALTA", "ACTIVO", "INACTIVO"] | None = None,
-    tipo_alta: Literal["NORMAL", "EXCEPCIONAL"] | None = None,
+    f: UserFilter = Depends(),  # noqa: B008
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     _: Principal = Depends(require("ADM.USUARIO.CONSULTA")),  # noqa: B008
     auth: AuthService = Depends(get_auth_service),  # noqa: B008
 ) -> UsuariosPage:
-    where = """
-     WHERE (CAST(:nombre AS text) IS NULL
-            OR (u.nombre || ' ' || u.primer_apellido || ' ' || coalesce(u.segundo_apellido, ''))
-               ILIKE :nombre)
-       AND (CAST(:red AS text) IS NULL OR u.usuario_red ILIKE :red)
-       AND (CAST(:ident AS text) IS NULL OR u.identificacion ILIKE :ident)
-       AND (CAST(:correo AS text) IS NULL OR u.correo ILIKE :correo)
-       AND (CAST(:g AS uuid) IS NULL OR u.gerencia_id = :g)
-       AND (CAST(:a AS uuid) IS NULL OR u.area_id = :a)
-       AND (CAST(:c AS uuid) IS NULL OR u.cargo_id = :c)
-       AND (CAST(:estado AS text) IS NULL OR u.estado = :estado)
-       AND (CAST(:tipo AS text) IS NULL OR u.tipo_alta = :tipo)
-    """
-    params = {
-        "nombre": _like(nombre) if nombre else None,
-        "red": _like(usuario_red.strip().lower()) if usuario_red else None,
-        "ident": _like(identificacion) if identificacion else None,
-        "correo": _like(correo) if correo else None,
-        "g": gerencia_id, "a": area_id, "c": cargo_id, "estado": estado, "tipo": tipo_alta,
-    }
+    where, params = f.sql()
     async with auth.sm() as s:
         total = (await s.execute(text(f"SELECT count(*) FROM app.usuario u {where}"),  # noqa: S608
                                  params)).scalar_one()
@@ -115,6 +129,37 @@ async def list_users(
         )).mappings().all()
     return UsuariosPage(items=[UsuarioOut(**r) for r in rows], total=total,
                         page=page, page_size=page_size)
+
+
+EXPORT_COLUMNS = ("usuario_red", "identificacion", "nombre", "primer_apellido",
+                  "segundo_apellido", "correo", "perfil_codigo", "gerencia", "area", "cargo",
+                  "codigo_cargo", "tipo_alta", "estado", "ultimo_ingreso")
+
+
+@router.post("/admin/users/export")
+async def export_users(
+    f: UserFilter, request: Request,
+    p: Principal = Depends(require("ADM.USUARIO.EXPORTACION")),  # noqa: B008
+    auth: AuthService = Depends(get_auth_service),  # noqa: B008
+) -> Response:
+    """CU-USR-07 / REQ-USER-11: exportación Excel de lo filtrado, auditada; solo campos
+    aprobados (REQ-USER-03)."""
+    where, params = f.sql()
+    async with auth.sm() as s:
+        rows = (await s.execute(
+            text(f"{_USER_SELECT} {where} ORDER BY u.usuario_red LIMIT :lim"),  # noqa: S608
+            {**params, "lim": MAX_EXPORT_ROWS + 1})).mappings().all()
+    truncated = len(rows) > MAX_EXPORT_ROWS
+    rows = rows[:MAX_EXPORT_ROWS]
+    async with UnitOfWork(auth.sm, audit_context(request, p), auth.spool) as uow:
+        uow.audit(AuditEntry(categoria="EXPORTACION", accion="USR_EXPORTED", modulo="ADM",
+                             entidad="usuario",
+                             detalle={"filtros": f.model_dump(mode="json", exclude_none=True),
+                                      "filas": len(rows), "truncado": truncated}))
+        await uow.commit()
+    content = build_xlsx("usuarios", EXPORT_COLUMNS,
+                         ([r[c] for c in EXPORT_COLUMNS] for r in rows))
+    return xlsx_response(content, "secureone-usuarios.xlsx", truncated)
 
 
 class UsuarioDetalleOut(UsuarioOut):
