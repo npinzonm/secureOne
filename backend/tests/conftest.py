@@ -7,6 +7,7 @@ os.environ.setdefault("POSTGRES_DB", "test")
 os.environ.setdefault("APP_DB_USER", "test_api")
 os.environ.setdefault("APP_DB_PASSWORD", "test-only-not-a-secret")
 os.environ.setdefault("REDIS_PASSWORD", "test-only-not-a-secret")
+os.environ.setdefault("JWT_SECRET", "test-only-jwt-secret-not-for-production-use-0123456789")
 os.environ.setdefault("SPOOL_DIR", tempfile.mkdtemp(prefix="secureone-spool-"))
 
 # Las pruebas de integración solo se recolectan dentro del ambiente de pruebas (make test-int).

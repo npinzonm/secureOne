@@ -6,6 +6,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -16,6 +17,9 @@ from app.core.errors import error_body, install_error_handlers
 from app.core.logging import configure_logging, correlation_id_var
 from app.kernel.audit import IncidentSpool
 from app.kernel.error_registry import classify, record_error
+from app.modules.auth.api.router import router as auth_router
+from app.modules.auth.application.service import AuthService
+from app.modules.auth.infrastructure.session_store import SessionStore
 
 API_PREFIX = "/api/v1"
 _CID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
@@ -28,6 +32,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     app.state.db = Database(settings.sqlalchemy_url)
     app.state.spool = IncidentSpool(settings.spool_dir)
+    app.state.redis = aioredis.Redis(
+        host=settings.redis_host,
+        port=settings.redis_port,
+        password=settings.redis_password.get_secret_value(),
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
+    app.state.auth = AuthService(
+        settings,
+        app.state.db.sessionmaker,
+        SessionStore(app.state.redis, settings.session_idle_seconds),
+        app.state.spool,
+    )
     # Recuperación: si quedaron incidentes de auditoría de una caída previa, registrarlos.
     try:
         n = await app.state.spool.flush(app.state.db.sessionmaker)
@@ -38,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        await app.state.redis.aclose()
         await app.state.db.dispose()
 
 
@@ -62,7 +80,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     is_dev = settings.app_env == "dev"
     app = FastAPI(
         title="SecureOne API",
-        version="0.2.0",
+        version="0.3.0",
         docs_url=f"{API_PREFIX}/docs" if is_dev else None,
         redoc_url=None,
         openapi_url=f"{API_PREFIX}/openapi.json" if is_dev else None,
@@ -92,6 +110,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
 
     install_error_handlers(app, on_unhandled=_record_unhandled)
     app.include_router(health.router, prefix=API_PREFIX)
+    app.include_router(auth_router, prefix=API_PREFIX)
     return app
 
 

@@ -41,6 +41,15 @@ class Settings(BaseSettings):
     # Directorio local de contingencia para incidentes de auditoría (REQ-AUD-07).
     spool_dir: str = "/var/lib/secureone/spool"
 
+    # Autenticación (PD-01 APROBADO; valores de P §5 APROBADOS).
+    jwt_secret: SecretStr
+    access_token_ttl_seconds: int = 300          # PD-01: 5 min
+    session_idle_seconds: int = 900              # P §5: 15 min de inactividad
+    lockout_threshold: int = 5                   # P §5: 5.º intento
+    lockout_minutes: int = 15                    # P §5: 15 min
+    password_history: int = 5                    # P §5: últimas cinco
+    refresh_cookie_secure: bool = True           # PD-18/PD-20
+
     @property
     def postgres_dsn(self) -> str:
         """DSN libpq del rol de runtime (psycopg directo)."""

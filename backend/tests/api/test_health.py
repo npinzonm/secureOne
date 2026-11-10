@@ -45,7 +45,7 @@ def test_ready_503_when_migrations_pending():
 def test_migrations_head_is_resolvable():
     from app.api.health import migrations_head
 
-    assert migrations_head() == "0001"
+    assert migrations_head() == "0002"
 
 
 def test_ready_503_when_postgres_down():

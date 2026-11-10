@@ -150,6 +150,8 @@ Se necesita para la planta activa y la de retirados:
 - **Necesito confirmación** (P §15 marca los mensajes como pendientes).
 
 ### PD-18 · Almacenamiento del token en el navegador
+> **Implementado en la Fase 3 (PROPUESTO, reversible):** la alternativa con access token en memoria (cabecera `Authorization: Bearer`) y refresh en cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`. Motivo: elimina el CSRF en todas las rutas salvo el refresh, que queda protegido por SameSite=Strict, sin añadir un mecanismo de token CSRF.
+
 - **Recomendación:** cookies `HttpOnly` + `Secure` + `SameSite=Strict` emitidas por el backend detrás de Nginx (mismo origen), con token CSRF de doble envío.
 - **Alternativa:** token en memoria + refresh en cookie.
 

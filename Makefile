@@ -3,7 +3,7 @@ DC      := docker compose
 DC_DEV  := docker compose -f docker-compose.yml -f docker-compose.dev.yml
 DC_TEST := docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml
 
-.PHONY: env up up-dev down down-dev logs ps health lint test test-int migrate audit-verify test-stack test-stack-down
+.PHONY: env up up-dev down down-dev logs ps health lint test test-int migrate audit-verify bootstrap-admin test-stack test-stack-down
 
 env:            ## Genera .env con secretos aleatorios (no sobrescribe)
 	./scripts/init-env.sh
@@ -40,6 +40,9 @@ test-int: env   ## Pruebas de integración contra PostgreSQL/Redis reales (ambie
 
 migrate:        ## Aplica migraciones (rol owner) en el stack base
 	$(DC) run --rm migrate
+
+bootstrap-admin: ## Crea un administrador inicial (interactivo; máx. 2). Muestra la temporal una vez
+	$(DC) exec backend python -m app.cli bootstrap-admin
 
 audit-verify:   ## Verifica la cadena de hash de la auditoría
 	$(DC) exec backend python -m app.cli audit-verify
