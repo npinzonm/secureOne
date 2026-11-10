@@ -8,14 +8,14 @@ Con aprobación (solo crean la solicitud; se aplican en la Fase 6):
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, Literal
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import BusinessRuleError, ConflictError, NotFoundError
+from app.core.errors import BusinessRuleError, ConflictError
 from app.core.ids import uuid7
 from app.kernel.audit import AuditEntry
 from app.kernel.authz import require
@@ -26,6 +26,15 @@ from app.modules.auth.application.service import AuthService, Principal
 from app.modules.auth.domain.password_policy import generate_temporary_password
 from app.modules.auth.infrastructure import repository as auth_repo
 from app.modules.auth.infrastructure.hashing import hash_password
+from app.modules.users.application.validators import (
+    active_admins,
+    active_id,
+    current_modules,
+    load_user,
+    module_codes,
+    record_state,
+    validate_org,
+)
 from app.modules.users.domain.identifiers import (
     is_valid_email,
     is_valid_identificacion,
@@ -61,58 +70,6 @@ def _out(r: CreatedRequest, uid: uuid.UUID) -> RequestOut:
                       usuario_id=uid)
 
 
-async def _user(s: AsyncSession, uid: uuid.UUID) -> dict[str, Any]:
-    row = (await s.execute(text(
-        "SELECT u.*, pf.codigo AS perfil FROM app.usuario u JOIN app.perfil pf "
-        "ON pf.id = u.perfil_id WHERE u.id = :u FOR UPDATE OF u"), {"u": uid})).mappings().first()
-    if row is None:
-        raise NotFoundError()
-    return dict(row)
-
-
-async def _active_id(s: AsyncSession, sql: str, value: Any, label: str) -> uuid.UUID:
-    row = (await s.execute(text(sql), {"v": value})).first()
-    if row is None:
-        raise BusinessRuleError(f"{label} no existe.")
-    if row[1] != "ACTIVO":
-        raise BusinessRuleError(f"{label} está inactivo.")
-    return row[0]
-
-
-async def _validate_org(s: AsyncSession, g: uuid.UUID, a: uuid.UUID, c: uuid.UUID) -> None:
-    await _active_id(s, "SELECT id, estado FROM app.gerencia WHERE id = :v", g, "La gerencia")
-    await _active_id(s, "SELECT id, estado FROM app.cargo WHERE id = :v", c, "El cargo")
-    area = (await s.execute(text("SELECT estado, gerencia_id FROM app.area WHERE id = :a"),
-                            {"a": a})).first()
-    if area is None or area[0] != "ACTIVO":
-        raise BusinessRuleError("El área no existe o está inactiva.")
-    if area[1] != g:  # REQ-USER-06
-        raise BusinessRuleError("El área no pertenece a la gerencia seleccionada.")
-
-
-async def _module_ids(s: AsyncSession, codes: list[str]) -> list[str]:
-    codes = sorted(set(codes))
-    rows = (await s.execute(text("SELECT codigo, estado FROM app.modulo WHERE codigo = ANY(:c)"),
-                            {"c": codes})).all()
-    found = {r[0]: r[1] for r in rows}
-    bad = [c for c in codes if found.get(c) != "ACTIVO"]
-    if bad:
-        raise BusinessRuleError("Hay módulos inexistentes o inactivos.", details={"modulos": bad})
-    return codes
-
-
-async def _current_modules(s: AsyncSession, uid: uuid.UUID) -> list[str]:
-    return list((await s.execute(text(
-        "SELECT m.codigo FROM app.usuario_modulo um JOIN app.modulo m ON m.id = um.modulo_id "
-        "WHERE um.usuario_id = :u AND um.estado = 'ACTIVO' ORDER BY 1"), {"u": uid})).scalars())
-
-
-async def _active_admins(s: AsyncSession) -> int:
-    return (await s.execute(text(
-        "SELECT count(*) FROM app.usuario u JOIN app.perfil pf ON pf.id = u.perfil_id "
-        "WHERE pf.codigo = 'ADMINISTRADOR' AND u.estado = 'ACTIVO'"))).scalar_one()
-
-
 # ============================================================================ CON APROBACIÓN
 
 class AltaIn(_In):
@@ -129,6 +86,7 @@ class AltaIn(_In):
     tipo_alta: Literal["NORMAL", "EXCEPCIONAL"]
     modulos: list[str] = Field(default_factory=list, max_length=50)
     motivo: str | None = Field(None, max_length=1000)
+    solicitud_vinculada_id: uuid.UUID | None = None
 
 
 @router.post("/admin/users", status_code=202, response_model=RequestOut)
@@ -147,28 +105,41 @@ async def request_user_creation(
         raise BusinessRuleError("Correo inválido.")
     async with _uow(request, p, auth) as uow:
         s = uow.session
+        reuse_id = await _reusable_alta(s, body.solicitud_vinculada_id)
         dup = (await s.execute(text(
             "SELECT usuario_red = :r AS red, identificacion = :i AS ident FROM app.usuario "
-            "WHERE usuario_red = :r OR identificacion = :i"),
-            {"r": red, "i": body.identificacion})).mappings().all()
+            "WHERE (usuario_red = :r OR identificacion = :i) "
+            "AND id IS DISTINCT FROM CAST(:reuse AS uuid)"),
+            {"r": red, "i": body.identificacion, "reuse": reuse_id})).mappings().all()
         if dup:  # REQ-USER-04: únicos (incluye inactivos y altas pendientes)
             raise ConflictError("El usuario de red o la identificación ya existen.", details={
                 "usuario_red": any(d["red"] for d in dup),
                 "identificacion": any(d["ident"] for d in dup)})
-        perfil_id = await _active_id(s, "SELECT id, estado FROM app.perfil WHERE codigo = :v",
+        perfil_id = await active_id(s, "SELECT id, estado FROM app.perfil WHERE codigo = :v",
                                      body.perfil, "El perfil")
-        await _validate_org(s, body.gerencia_id, body.area_id, body.cargo_id)
-        modulos = await _module_ids(s, body.modulos)
-        uid = uuid7()
-        await s.execute(text(
-            "INSERT INTO app.usuario (id, usuario_red, identificacion, nombre, primer_apellido, "
-            "segundo_apellido, correo, perfil_id, gerencia_id, area_id, cargo_id, tipo_alta, "
-            "estado, creado_por) VALUES (:id, :r, :i, :n, :a1, :a2, :c, :pf, :g, :ar, :cg, :t, "
-            "'PENDIENTE_ALTA', :by)"),
-            {"id": uid, "r": red, "i": body.identificacion, "n": body.nombre,
-             "a1": body.primer_apellido, "a2": body.segundo_apellido or None, "c": body.correo,
-             "pf": perfil_id, "g": body.gerencia_id, "ar": body.area_id, "cg": body.cargo_id,
-             "t": body.tipo_alta, "by": p.user_id})
+        await validate_org(s, body.gerencia_id, body.area_id, body.cargo_id)
+        modulos = await module_codes(s, body.modulos)
+        uid = reuse_id or uuid7()
+        params = {"id": uid, "r": red, "i": body.identificacion, "n": body.nombre,
+                  "a1": body.primer_apellido, "a2": body.segundo_apellido or None,
+                  "c": body.correo, "pf": perfil_id, "g": body.gerencia_id,
+                  "ar": body.area_id, "cg": body.cargo_id, "t": body.tipo_alta,
+                  "by": p.user_id}
+        if reuse_id is None:
+            await s.execute(text(
+                "INSERT INTO app.usuario (id, usuario_red, identificacion, nombre, "
+                "primer_apellido, segundo_apellido, correo, perfil_id, gerencia_id, area_id, "
+                "cargo_id, tipo_alta, estado, creado_por) VALUES (:id, :r, :i, :n, :a1, :a2, "
+                ":c, :pf, :g, :ar, :cg, :t, 'PENDIENTE_ALTA', :by)"), params)
+        else:  # corrección vinculada de un alta rechazada/cancelada (PROPUESTO, ver FASE-6)
+            await s.execute(text(
+                "UPDATE app.usuario SET usuario_red = :r, identificacion = :i, nombre = :n, "
+                "primer_apellido = :a1, segundo_apellido = :a2, correo = :c, perfil_id = :pf, "
+                "gerencia_id = :g, area_id = :ar, cargo_id = :cg, tipo_alta = :t, "
+                "estado = 'PENDIENTE_ALTA', modificado_en = now(), modificado_por = :by "
+                "WHERE id = :id"), params)
+            await record_state(s, uid, "INACTIVO", "PENDIENTE_ALTA",
+                               "Corrección de alta (solicitud vinculada)", p.user_id, None)
         nuevo = {"usuario_red": red, "identificacion": body.identificacion,
                  "nombre": body.nombre, "primer_apellido": body.primer_apellido,
                  "segundo_apellido": body.segundo_apellido or None, "correo": body.correo,
@@ -178,9 +149,29 @@ async def request_user_creation(
         created = await create_request(
             uow, tipo="ALTA_USUARIO", entidad="usuario", entidad_id=uid,
             solicitante_id=p.user_id, motivo=body.motivo,
+            vinculada_id=body.solicitud_vinculada_id,
             items=[Item(k, None, v) for k, v in nuevo.items()])
         await uow.commit()
     return _out(created, uid)
+
+
+async def _reusable_alta(s: AsyncSession, vinculada_id: uuid.UUID | None) -> uuid.UUID | None:
+    """Un alta rechazada/cancelada cuyo usuario nunca se activó puede corregirse reutilizando
+    el registro (unicidad de usuario de red/identificación, REQ-USER-04)."""
+    if vinculada_id is None:
+        return None
+    row = (await s.execute(text(
+        "SELECT s.tipo, s.estado, s.entidad_id, u.estado AS u_estado, "
+        "EXISTS (SELECT 1 FROM app.credencial c WHERE c.usuario_id = u.id) AS activado "
+        "FROM app.solicitud s JOIN app.usuario u ON u.id = s.entidad_id "
+        "WHERE s.id = :i AND s.entidad = 'usuario' FOR UPDATE OF u"),
+        {"i": vinculada_id})).mappings().first()
+    if (row is None or row["tipo"] != "ALTA_USUARIO"
+            or row["estado"] not in ("CANCELADA", "RECHAZADA")):
+        raise BusinessRuleError("La solicitud vinculada debe ser un alta cancelada o rechazada.")
+    if row["u_estado"] != "INACTIVO" or row["activado"]:
+        raise BusinessRuleError("El usuario de esa alta ya fue activado; use reactivación.")
+    return row["entidad_id"]
 
 
 class ModificacionIn(_In):
@@ -194,6 +185,7 @@ class ModificacionIn(_In):
     area_id: uuid.UUID | None = None
     cargo_id: uuid.UUID | None = None
     motivo: str | None = Field(None, max_length=1000)
+    solicitud_vinculada_id: uuid.UUID | None = None
 
 
 @router.patch("/admin/users/{user_id}", status_code=202, response_model=RequestOut)
@@ -205,10 +197,10 @@ async def request_user_update(
     """CU-USR-04 / D-APR-002: cambios múltiples agrupados en UNA solicitud, un ítem por atributo."""
     async with _uow(request, p, auth) as uow:
         s = uow.session
-        u = await _user(s, user_id)
+        u = await load_user(s, user_id)
         if u["estado"] != "ACTIVO":
             raise BusinessRuleError("Solo se modifican usuarios activos.")
-        fields = body.model_dump(exclude={"motivo"}, exclude_unset=True)
+        fields = body.model_dump(exclude={"motivo", "solicitud_vinculada_id"}, exclude_unset=True)
         current = {k: (str(u[k]) if isinstance(u.get(k), uuid.UUID) else u.get(k))
                    for k in fields if k != "perfil"}
         current["perfil"] = u["perfil"]
@@ -226,7 +218,7 @@ async def request_user_update(
         if "correo" in changes and not is_valid_email(changes["correo"] or ""):
             raise BusinessRuleError("Correo inválido.")
         if "perfil" in changes:
-            await _active_id(s, "SELECT id, estado FROM app.perfil WHERE codigo = :v",
+            await active_id(s, "SELECT id, estado FROM app.perfil WHERE codigo = :v",
                              changes["perfil"], "El perfil")
         if {"gerencia_id", "area_id", "cargo_id"} & changes.keys():
             g = changes.get("gerencia_id", u["gerencia_id"])
@@ -234,13 +226,14 @@ async def request_user_update(
             c = changes.get("cargo_id", u["cargo_id"])
             if not (g and a and c):
                 raise BusinessRuleError("Gerencia, área y cargo son obligatorios.")
-            await _validate_org(s, uuid.UUID(str(g)), uuid.UUID(str(a)), uuid.UUID(str(c)))
+            await validate_org(s, uuid.UUID(str(g)), uuid.UUID(str(a)), uuid.UUID(str(c)))
         if u["perfil"] == "ADMINISTRADOR" and changes.get("perfil", "ADMINISTRADOR") != \
-                "ADMINISTRADOR" and await _active_admins(s) <= 1:
+                "ADMINISTRADOR" and await active_admins(s) <= 1:
             raise ConflictError("No se puede dejar al sistema sin administradores activos.")
         created = await create_request(
             uow, tipo="MODIFICACION_USUARIO", entidad="usuario", entidad_id=user_id,
             solicitante_id=p.user_id, motivo=body.motivo,
+            vinculada_id=body.solicitud_vinculada_id,
             items=[Item(k, current.get(k), v) for k, v in sorted(changes.items())])
         await uow.commit()
     return _out(created, user_id)
@@ -249,6 +242,7 @@ async def request_user_update(
 class ModulosIn(_In):
     modulos: list[str] = Field(max_length=50)
     motivo: str | None = Field(None, max_length=1000)
+    solicitud_vinculada_id: uuid.UUID | None = None
 
 
 @router.put("/admin/users/{user_id}/modules", status_code=202, response_model=RequestOut)
@@ -259,11 +253,11 @@ async def request_user_modules(
 ) -> RequestOut:
     async with _uow(request, p, auth) as uow:
         s = uow.session
-        u = await _user(s, user_id)
+        u = await load_user(s, user_id)
         if u["estado"] != "ACTIVO":
             raise BusinessRuleError("Solo se asignan módulos a usuarios activos.")
-        desired = await _module_ids(s, body.modulos)
-        current = await _current_modules(s, user_id)
+        desired = await module_codes(s, body.modulos)
+        current = await current_modules(s, user_id)
         if desired == current:
             raise BusinessRuleError("No hay cambios respecto de los módulos actuales.")
         if u["perfil"] == "ADMINISTRADOR" and "ADM" not in desired:
@@ -271,6 +265,7 @@ async def request_user_modules(
         created = await create_request(
             uow, tipo="MODULOS_USUARIO", entidad="usuario", entidad_id=user_id,
             solicitante_id=p.user_id, motivo=body.motivo,
+            vinculada_id=body.solicitud_vinculada_id,
             items=[Item("modulos", current, desired)])
         await uow.commit()
     return _out(created, user_id)
@@ -278,6 +273,7 @@ async def request_user_modules(
 
 class MotivoIn(_In):
     motivo: str = MOTIVO
+    solicitud_vinculada_id: uuid.UUID | None = None
 
 
 @router.post("/admin/users/{user_id}/deactivate", status_code=202, response_model=RequestOut)
@@ -289,14 +285,15 @@ async def request_user_deactivation(
     """CU-USR-05 / REQ-USER-08: inhabilitación lógica con motivo; efectiva al aprobarse."""
     async with _uow(request, p, auth) as uow:
         s = uow.session
-        u = await _user(s, user_id)
+        u = await load_user(s, user_id)
         if u["estado"] != "ACTIVO":
             raise BusinessRuleError("Solo se inhabilitan usuarios activos.")
-        if u["perfil"] == "ADMINISTRADOR" and await _active_admins(s) <= 1:
+        if u["perfil"] == "ADMINISTRADOR" and await active_admins(s) <= 1:
             raise ConflictError("No se puede dejar al sistema sin administradores activos.")
         created = await create_request(
             uow, tipo="INHABILITACION_USUARIO", entidad="usuario", entidad_id=user_id,
             solicitante_id=p.user_id, motivo=body.motivo,
+            vinculada_id=body.solicitud_vinculada_id,
             items=[Item("estado", "ACTIVO", "INACTIVO")])
         await uow.commit()
     return _out(created, user_id)
@@ -310,12 +307,13 @@ async def request_user_reactivation(
 ) -> RequestOut:
     """CU-USR-06 / REQ-AUTH-11: al aplicarse exigirá contraseña temporal y cambio (Fase 6)."""
     async with _uow(request, p, auth) as uow:
-        u = await _user(uow.session, user_id)
+        u = await load_user(uow.session, user_id)
         if u["estado"] != "INACTIVO":
             raise BusinessRuleError("Solo se reactivan usuarios inactivos.")
         created = await create_request(
             uow, tipo="REACTIVACION_USUARIO", entidad="usuario", entidad_id=user_id,
             solicitante_id=p.user_id, motivo=body.motivo,
+            vinculada_id=body.solicitud_vinculada_id,
             items=[Item("estado", "INACTIVO", "ACTIVO")])
         await uow.commit()
     return _out(created, user_id)
@@ -340,7 +338,7 @@ async def reset_password(
     temp = generate_temporary_password()
     async with _uow(request, p, auth) as uow:
         s = uow.session
-        u = await _user(s, user_id)
+        u = await load_user(s, user_id)
         if u["estado"] != "ACTIVO":
             raise BusinessRuleError("Solo se generan contraseñas temporales para cuentas activas.")
         await auth_repo.set_password(s, user_id, hash_password(temp), must_change=True,
@@ -365,7 +363,7 @@ async def revoke_session(
     auth: AuthService = Depends(get_auth_service),  # noqa: B008
 ) -> dict[str, bool]:
     async with _uow(request, p, auth) as uow:
-        await _user(uow.session, user_id)
+        await load_user(uow.session, user_id)
         sid = await auth_repo.close_open_session(uow.session, user_id, "REVOCADA_ADMIN")
         if sid is None:
             return {"revocada": False}

@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError
+from app.core.errors import BusinessRuleError, ConflictError
 from app.core.ids import uuid7
 from app.kernel.audit import AuditEntry
 from app.kernel.unit_of_work import UnitOfWork
@@ -39,12 +39,28 @@ async def pending_for(s: AsyncSession, entidad: str, entidad_id: uuid.UUID) -> i
         "AND estado = 'PENDIENTE'"), {"e": entidad, "i": entidad_id})).scalar()
 
 
+async def validate_link(s: AsyncSession, vinculada_id: uuid.UUID, entidad: str,
+                        entidad_id: uuid.UUID) -> dict[str, Any]:
+    """REQ-APR-06: una corrección se vincula a una solicitud CANCELADA o RECHAZADA de la misma
+    entidad (la original no se modifica)."""
+    link = (await s.execute(text(
+        "SELECT tipo, estado, entidad, entidad_id FROM app.solicitud WHERE id = :i"),
+        {"i": vinculada_id})).mappings().first()
+    if link is None or link["entidad"] != entidad or link["entidad_id"] != entidad_id:
+        raise BusinessRuleError("La solicitud vinculada no existe o es de otra entidad.")
+    if link["estado"] not in ("CANCELADA", "RECHAZADA"):
+        raise BusinessRuleError("Solo se vincula a una solicitud cancelada o rechazada.")
+    return dict(link)
+
+
 async def create_request(
     uow: UnitOfWork, *, tipo: str, entidad: str, entidad_id: uuid.UUID,
     solicitante_id: uuid.UUID | None, items: list[Item], motivo: str | None = None,
     origen: str = "MANUAL", vinculada_id: uuid.UUID | None = None,
 ) -> CreatedRequest:
     s = uow.session
+    if vinculada_id is not None:
+        await validate_link(s, vinculada_id, entidad, entidad_id)
     existing = await pending_for(s, entidad, entidad_id)
     if existing is not None:
         raise ConflictError("Ya existe una solicitud pendiente sobre este registro.",

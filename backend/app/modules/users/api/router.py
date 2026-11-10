@@ -7,7 +7,7 @@ Las operaciones que modifican usuarios llegan en la Fase 5 (PD-05).
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
@@ -194,3 +194,79 @@ async def get_user_activity(
         sesion_activa=any(x["finalizada_en"] is None for x in sesiones),
         sesiones=[SesionOut(**x) for x in sesiones],
     )
+
+
+class HistItemOut(BaseModel):
+    atributo: str
+    valor_anterior: Any
+    valor_nuevo: Any
+
+
+class HistSolicitudOut(BaseModel):
+    numero: int
+    tipo: str
+    estado: str
+    motivo: str | None
+    creada_en: datetime
+    solicitante: str | None
+    resuelta_en: datetime | None
+    resuelta_por: str | None
+    motivo_resolucion: str | None
+    solicitud_vinculada: int | None
+    items: list[HistItemOut]
+
+
+class HistEstadoOut(BaseModel):
+    estado_anterior: str | None
+    estado_nuevo: str
+    motivo: str
+    actor: str | None
+    solicitud: int | None
+    ocurrido_en: datetime
+
+
+class HistorialOut(BaseModel):
+    solicitudes: list[HistSolicitudOut]
+    estados: list[HistEstadoOut]
+
+
+@router.get("/admin/users/{user_id}/history", response_model=HistorialOut)
+async def get_user_history(
+    user_id: uuid.UUID,
+    _: Principal = Depends(require("ADM.USUARIO.CONSULTA")),  # noqa: B008
+    auth: AuthService = Depends(get_auth_service),  # noqa: B008
+) -> HistorialOut:
+    """REQ-USER-08 / D-APR-002: historial por atributo (ítems de cada solicitud con su
+    resolución) e historial de estados con actor, fecha y motivo."""
+    async with auth.sm() as s:
+        if not (await s.execute(text("SELECT 1 FROM app.usuario WHERE id = :u"),
+                                {"u": user_id})).first():
+            raise NotFoundError()
+        sols = (await s.execute(text(
+            "SELECT so.id, so.numero, so.tipo, so.estado, so.motivo, so.creada_en, "
+            "us.usuario_red AS solicitante, so.resuelta_en, ur.usuario_red AS resuelta_por, "
+            "so.motivo_resolucion, sv.numero AS solicitud_vinculada "
+            "FROM app.solicitud so LEFT JOIN app.usuario us ON us.id = so.solicitante_id "
+            "LEFT JOIN app.usuario ur ON ur.id = so.resuelta_por_id "
+            "LEFT JOIN app.solicitud sv ON sv.id = so.solicitud_vinculada_id "
+            "WHERE so.entidad = 'usuario' AND so.entidad_id = :u ORDER BY so.numero"),
+            {"u": user_id})).mappings().all()
+        items = (await s.execute(text(
+            "SELECT solicitud_id, atributo, valor_anterior, valor_nuevo FROM app.solicitud_item "
+            "WHERE solicitud_id = ANY(:ids) ORDER BY orden"),
+            {"ids": [x["id"] for x in sols]})).mappings().all()
+        estados = (await s.execute(text(
+            "SELECT h.estado_anterior, h.estado_nuevo, h.motivo, a.usuario_red AS actor, "
+            "so.numero AS solicitud, h.ocurrido_en FROM app.usuario_estado_historial h "
+            "LEFT JOIN app.usuario a ON a.id = h.actor_id "
+            "LEFT JOIN app.solicitud so ON so.id = h.solicitud_id "
+            "WHERE h.usuario_id = :u ORDER BY h.ocurrido_en"), {"u": user_id})).mappings().all()
+    by_sol: dict[uuid.UUID, list[HistItemOut]] = {}
+    for it in items:
+        by_sol.setdefault(it["solicitud_id"], []).append(HistItemOut(
+            atributo=it["atributo"], valor_anterior=it["valor_anterior"],
+            valor_nuevo=it["valor_nuevo"]))
+    return HistorialOut(
+        solicitudes=[HistSolicitudOut(**{k: v for k, v in x.items() if k != "id"},
+                                      items=by_sol.get(x["id"], [])) for x in sols],
+        estados=[HistEstadoOut(**e) for e in estados])

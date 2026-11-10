@@ -86,7 +86,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     is_dev = settings.app_env == "dev"
     app = FastAPI(
         title="SecureOne API",
-        version="0.5.0",
+        version="0.6.0",
         docs_url=f"{API_PREFIX}/docs" if is_dev else None,
         redoc_url=None,
         openapi_url=f"{API_PREFIX}/openapi.json" if is_dev else None,
