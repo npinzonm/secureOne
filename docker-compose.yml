@@ -49,6 +49,8 @@ services:
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD requerido}
       REDIS_HOST: redis
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD requerido}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET requerido}
+      REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-true}
     volumes:
       - spool:/var/lib/secureone/spool
     depends_on:
