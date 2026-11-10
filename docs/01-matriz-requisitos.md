@@ -101,7 +101,7 @@
 | REQ-APR-07 | Las propuestas de TH se versionan bajo un ID estable y solo la última versión es aprobable. | P §7 | APROBADO | Alta | 8 |
 | REQ-APR-08 | Ambos administradores reciben las notificaciones definidas, sin importar quién solicita o aprueba. | P §7 | APROBADO | Alta | 7 |
 | REQ-APR-09 | No hay doble aprobación ni prohibición de autoaprobación; esta regla no vuelve aprobables las operaciones directas. | P §7 | APROBADO | Crítica | 6 |
-| REQ-APR-10 | Matriz final de operaciones directas y operaciones con aprobación; estados y notificaciones exhaustivos. | P §15 (APR) | PENDIENTE → matriz PROPUESTA en [ESP-APR](especificaciones/ESP-APR.md#matriz-de-operaciones-propuesta) (PD-05) | — | — |
+| REQ-APR-10 | Matriz final de qué operaciones son directas y cuáles requieren aprobación; estados y notificaciones exhaustivos. | P §15 (APR) | Matriz **APROBADA** (PD-05, 2026-11-10; [ESP-APR §2](especificaciones/ESP-APR.md)); estados y notificaciones exhaustivos: PENDIENTE | Crítica | 5–6 |
 
 ## 6. Integración Talento Humano (TH)
 

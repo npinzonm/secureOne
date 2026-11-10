@@ -12,22 +12,22 @@
 | CU-APR-04 | Cancelar con motivo y, opcionalmente, crear una solicitud vinculada | Cualquier admin |
 | CU-APR-05 | Generar una solicitud desde TH (retiro o alta propuesta) | Sistema |
 
-## 2. Matriz de operaciones (PROPUESTA — PD-05)
+## 2. Matriz de operaciones (APROBADA 2026-11-10 — PD-05)
 
 | Operación | Tipo | Estado de la clasificación |
 |---|---|---|
 | Alta de usuario | **Con aprobación** | APROBADO (P §6.1) |
 | Inhabilitación por retiro detectado en TH | **Con aprobación** | APROBADO (D-TH-001) |
 | Orden de módulos | **Directa** | APROBADO (P §6.2) |
-| Modificación de datos de usuario (agrupable) | Con aprobación | PROPUESTO (P §7 implica que los cambios de usuario se agrupan en solicitudes) |
-| Cambio de perfil de un usuario | Con aprobación | PROPUESTO |
-| Asignación o revocación de módulos de un usuario | Con aprobación | PROPUESTO |
-| Inhabilitación manual de usuario | Con aprobación | PROPUESTO |
-| Reactivación de usuario | Con aprobación | PROPUESTO |
-| Generar contraseña temporal / revocar sesión | Directa | PROPUESTO (urgencia operativa) |
-| Gestionar perfiles, roles, permisos y módulos (con impacto previo) | Directa | PROPUESTO |
-| Dominios, parámetros, estado de atención de errores | Directa | PROPUESTO |
-| Carga de archivo TH | Directa (genera solicitudes) | PROPUESTO |
+| Modificación de datos de usuario (agrupable) | Con aprobación | APROBADO (PD-05) (P §7 implica que los cambios de usuario se agrupan en solicitudes) |
+| Cambio de perfil de un usuario | Con aprobación | APROBADO (PD-05) |
+| Asignación o revocación de módulos de un usuario | Con aprobación | APROBADO (PD-05) |
+| Inhabilitación manual de usuario | Con aprobación | APROBADO (PD-05) |
+| Reactivación de usuario | Con aprobación | APROBADO (PD-05) |
+| Generar contraseña temporal / revocar sesión | Directa | APROBADO (PD-05) (urgencia operativa) |
+| Gestionar perfiles, roles, permisos y módulos (con impacto previo) | Directa | APROBADO (PD-05) |
+| Dominios, parámetros, estado de atención de errores | Directa | APROBADO (PD-05) |
+| Carga de archivo TH | Directa (genera solicitudes) | APROBADO (PD-05) |
 
 ## 3. Reglas
 
