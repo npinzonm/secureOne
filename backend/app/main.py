@@ -17,10 +17,14 @@ from app.core.errors import error_body, install_error_handlers
 from app.core.logging import configure_logging, correlation_id_var
 from app.kernel.audit import IncidentSpool
 from app.kernel.error_registry import classify, record_error
+from app.modules.approvals.api.router import router as approvals_router
 from app.modules.auth.api.router import router as auth_router
 from app.modules.auth.application.service import AuthService
 from app.modules.auth.infrastructure.session_store import SessionStore
+from app.modules.iam.api.admin_router import router as iam_admin_router
 from app.modules.iam.api.router import router as iam_router
+from app.modules.params.api.router import router as params_router
+from app.modules.users.api.admin_ops import router as users_admin_router
 from app.modules.users.api.router import router as users_router
 
 API_PREFIX = "/api/v1"
@@ -82,7 +86,7 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     is_dev = settings.app_env == "dev"
     app = FastAPI(
         title="SecureOne API",
-        version="0.4.0",
+        version="0.5.0",
         docs_url=f"{API_PREFIX}/docs" if is_dev else None,
         redoc_url=None,
         openapi_url=f"{API_PREFIX}/openapi.json" if is_dev else None,
@@ -115,6 +119,10 @@ def create_app(*, with_lifespan: bool = True) -> FastAPI:
     app.include_router(auth_router, prefix=API_PREFIX)
     app.include_router(iam_router, prefix=API_PREFIX)
     app.include_router(users_router, prefix=API_PREFIX)
+    app.include_router(iam_admin_router, prefix=API_PREFIX)
+    app.include_router(users_admin_router, prefix=API_PREFIX)
+    app.include_router(approvals_router, prefix=API_PREFIX)
+    app.include_router(params_router, prefix=API_PREFIX)
     return app
 
 
