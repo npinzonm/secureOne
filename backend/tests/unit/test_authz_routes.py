@@ -20,6 +20,7 @@ SESSION_ONLY = {
     ("GET", "/api/v1/me/modules"),
     ("GET", "/api/v1/me/permissions"),
     ("GET", "/api/v1/notifications"),
+    ("GET", "/api/v1/notifications/count"),
     ("POST", "/api/v1/notifications/{delivery_id}/read"),
 }
 

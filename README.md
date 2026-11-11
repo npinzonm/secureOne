@@ -3,7 +3,7 @@
 Plataforma modular de Seguridad de la Información y Ciberseguridad.
 Stack: Next.js · FastAPI · PostgreSQL · Redis · Nginx · Docker Compose · GitHub Actions.
 
-> Estado: **Fases 1–7 implementadas**: infraestructura, fundamentos, autenticación, IAM, operaciones administrativas (PD-05), resolución de solicitudes, auditoría consultable/exportable, registro de errores, notificaciones (bandeja + correo) y worker en segundo plano.
+> Estado: **Fases 1–9 implementadas** (backend completo de v1.0, integración TH y frontend funcional). Las definiciones de TH y UX se tomaron **por delegación** ([docs/06](docs/06-definiciones-delegadas.md)). Pendiente: Fase 10 (E2E automatizadas, respaldos y endurecimiento).
 > El diseño técnico (PROPUESTO, pendiente de validación) está en [`docs/`](docs/00-README.md).
 
 ## Requisitos
@@ -15,7 +15,7 @@ Stack: Next.js · FastAPI · PostgreSQL · Redis · Nginx · Docker Compose · G
 make up          # genera .env con secretos aleatorios (si no existe) y levanta el stack
 make health      # smoke test: frontend, API, readiness y cabeceras
 ```
-Abrir: <http://127.0.0.1:8080>. Nginx publica el único puerto de la aplicación (solo en `127.0.0.1`). Mailpit (SMTP local del prototipo) expone su UI en <http://127.0.0.1:8025> para revisar los correos enviados.
+Abrir: <http://127.0.0.1:8080> e iniciar sesión con un administrador creado con `make bootstrap-admin` (ver más abajo). Nginx publica el único puerto de la aplicación (solo en `127.0.0.1`). Mailpit (SMTP local del prototipo) expone su UI en <http://127.0.0.1:8025> para revisar los correos enviados.
 
 ## Operación diaria
 
@@ -84,4 +84,4 @@ docs/        Diseño técnico, especificaciones y fases
 ```
 
 ## Pendiente en fases siguientes
-Integración TH (Fase 8, requiere PD-09) · frontend (Fase 9) · respaldo y restauración (Fase 10) · TLS local (PD-20).
+Fase 10: pruebas E2E de navegador, respaldo/restauración, endurecimiento · respaldo y restauración (Fase 10) · TLS local (PD-20).

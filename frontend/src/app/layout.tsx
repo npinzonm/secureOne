@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { SessionProvider } from "@/lib/session";
+import "./globals.css";
 
 export const metadata: Metadata = {
   title: "SecureOne",
@@ -9,8 +11,8 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="es">
-      <body style={{ fontFamily: "system-ui, sans-serif", margin: 0, padding: "2rem" }}>
-        {children}
+      <body>
+        <SessionProvider>{children}</SessionProvider>
       </body>
     </html>
   );
