@@ -89,13 +89,9 @@ class AltaIn(_In):
     solicitud_vinculada_id: uuid.UUID | None = None
 
 
-@router.post("/admin/users", status_code=202, response_model=RequestOut)
-async def request_user_creation(
-    body: AltaIn, request: Request,
-    p: Principal = Depends(require("ADM.USUARIO.CREACION")),  # noqa: B008
-    auth: AuthService = Depends(get_auth_service),  # noqa: B008
-) -> RequestOut:
-    """CU-USR-03 / REQ-USER-01, 07: alta individual; efectiva solo al aprobarse (Fase 6)."""
+async def create_alta(uow: UnitOfWork, p: Principal,
+                      body: AltaIn) -> tuple[CreatedRequest, uuid.UUID]:
+    """Núcleo del alta (CU-USR-03), reutilizado por la decisión sobre propuestas TH."""
     red = normalize_usuario_red(body.usuario_red)
     if not is_valid_usuario_red(red):
         raise BusinessRuleError("Usuario de red inválido: 8 caracteres alternados letra/número.")
@@ -103,56 +99,89 @@ async def request_user_creation(
         raise BusinessRuleError("Identificación inválida.")
     if not is_valid_email(body.correo):
         raise BusinessRuleError("Correo inválido.")
+    s = uow.session
+    await _check_tipo_alta(s, body)
+    reuse_id = await _reusable_alta(s, body.solicitud_vinculada_id)
+    dup = (await s.execute(text(
+        "SELECT usuario_red = :r AS red, identificacion = :i AS ident FROM app.usuario "
+        "WHERE (usuario_red = :r OR identificacion = :i) "
+        "AND id IS DISTINCT FROM CAST(:reuse AS uuid)"),
+        {"r": red, "i": body.identificacion, "reuse": reuse_id})).mappings().all()
+    if dup:  # REQ-USER-04: únicos (incluye inactivos y altas pendientes)
+        raise ConflictError("El usuario de red o la identificación ya existen.", details={
+            "usuario_red": any(d["red"] for d in dup),
+            "identificacion": any(d["ident"] for d in dup)})
+    perfil_id = await active_id(s, "SELECT id, estado FROM app.perfil WHERE codigo = :v",
+                                 body.perfil, "El perfil")
+    await validate_org(s, body.gerencia_id, body.area_id, body.cargo_id)
+    modulos = await module_codes(s, body.modulos)
+    uid = reuse_id or uuid7()
+    params = {"id": uid, "r": red, "i": body.identificacion, "n": body.nombre,
+              "a1": body.primer_apellido, "a2": body.segundo_apellido or None,
+              "c": body.correo, "pf": perfil_id, "g": body.gerencia_id,
+              "ar": body.area_id, "cg": body.cargo_id, "t": body.tipo_alta,
+              "by": p.user_id}
+    if reuse_id is None:
+        await s.execute(text(
+            "INSERT INTO app.usuario (id, usuario_red, identificacion, nombre, "
+            "primer_apellido, segundo_apellido, correo, perfil_id, gerencia_id, area_id, "
+            "cargo_id, tipo_alta, estado, creado_por) VALUES (:id, :r, :i, :n, :a1, :a2, "
+            ":c, :pf, :g, :ar, :cg, :t, 'PENDIENTE_ALTA', :by)"), params)
+    else:  # corrección vinculada de un alta rechazada/cancelada (PROPUESTO, ver FASE-6)
+        await s.execute(text(
+            "UPDATE app.usuario SET usuario_red = :r, identificacion = :i, nombre = :n, "
+            "primer_apellido = :a1, segundo_apellido = :a2, correo = :c, perfil_id = :pf, "
+            "gerencia_id = :g, area_id = :ar, cargo_id = :cg, tipo_alta = :t, "
+            "estado = 'PENDIENTE_ALTA', modificado_en = now(), modificado_por = :by "
+            "WHERE id = :id"), params)
+        await record_state(s, uid, "INACTIVO", "PENDIENTE_ALTA",
+                           "Corrección de alta (solicitud vinculada)", p.user_id, None)
+    nuevo = {"usuario_red": red, "identificacion": body.identificacion,
+             "nombre": body.nombre, "primer_apellido": body.primer_apellido,
+             "segundo_apellido": body.segundo_apellido or None, "correo": body.correo,
+             "perfil": body.perfil, "gerencia_id": str(body.gerencia_id),
+             "area_id": str(body.area_id), "cargo_id": str(body.cargo_id),
+             "tipo_alta": body.tipo_alta, "modulos": modulos, "estado": "ACTIVO"}
+    created = await create_request(
+        uow, tipo="ALTA_USUARIO", entidad="usuario", entidad_id=uid,
+        solicitante_id=p.user_id, motivo=body.motivo,
+        vinculada_id=body.solicitud_vinculada_id,
+        items=[Item(k, None, v) for k, v in nuevo.items()])
+    return created, uid
+
+
+@router.post("/admin/users", status_code=202, response_model=RequestOut)
+async def request_user_creation(
+    body: AltaIn, request: Request,
+    p: Principal = Depends(require("ADM.USUARIO.CREACION")),  # noqa: B008
+    auth: AuthService = Depends(get_auth_service),  # noqa: B008
+) -> RequestOut:
+    """CU-USR-03 / REQ-USER-01, 07: alta individual; efectiva solo al aprobarse (Fase 6)."""
     async with _uow(request, p, auth) as uow:
-        s = uow.session
-        reuse_id = await _reusable_alta(s, body.solicitud_vinculada_id)
-        dup = (await s.execute(text(
-            "SELECT usuario_red = :r AS red, identificacion = :i AS ident FROM app.usuario "
-            "WHERE (usuario_red = :r OR identificacion = :i) "
-            "AND id IS DISTINCT FROM CAST(:reuse AS uuid)"),
-            {"r": red, "i": body.identificacion, "reuse": reuse_id})).mappings().all()
-        if dup:  # REQ-USER-04: únicos (incluye inactivos y altas pendientes)
-            raise ConflictError("El usuario de red o la identificación ya existen.", details={
-                "usuario_red": any(d["red"] for d in dup),
-                "identificacion": any(d["ident"] for d in dup)})
-        perfil_id = await active_id(s, "SELECT id, estado FROM app.perfil WHERE codigo = :v",
-                                     body.perfil, "El perfil")
-        await validate_org(s, body.gerencia_id, body.area_id, body.cargo_id)
-        modulos = await module_codes(s, body.modulos)
-        uid = reuse_id or uuid7()
-        params = {"id": uid, "r": red, "i": body.identificacion, "n": body.nombre,
-                  "a1": body.primer_apellido, "a2": body.segundo_apellido or None,
-                  "c": body.correo, "pf": perfil_id, "g": body.gerencia_id,
-                  "ar": body.area_id, "cg": body.cargo_id, "t": body.tipo_alta,
-                  "by": p.user_id}
-        if reuse_id is None:
-            await s.execute(text(
-                "INSERT INTO app.usuario (id, usuario_red, identificacion, nombre, "
-                "primer_apellido, segundo_apellido, correo, perfil_id, gerencia_id, area_id, "
-                "cargo_id, tipo_alta, estado, creado_por) VALUES (:id, :r, :i, :n, :a1, :a2, "
-                ":c, :pf, :g, :ar, :cg, :t, 'PENDIENTE_ALTA', :by)"), params)
-        else:  # corrección vinculada de un alta rechazada/cancelada (PROPUESTO, ver FASE-6)
-            await s.execute(text(
-                "UPDATE app.usuario SET usuario_red = :r, identificacion = :i, nombre = :n, "
-                "primer_apellido = :a1, segundo_apellido = :a2, correo = :c, perfil_id = :pf, "
-                "gerencia_id = :g, area_id = :ar, cargo_id = :cg, tipo_alta = :t, "
-                "estado = 'PENDIENTE_ALTA', modificado_en = now(), modificado_por = :by "
-                "WHERE id = :id"), params)
-            await record_state(s, uid, "INACTIVO", "PENDIENTE_ALTA",
-                               "Corrección de alta (solicitud vinculada)", p.user_id, None)
-        nuevo = {"usuario_red": red, "identificacion": body.identificacion,
-                 "nombre": body.nombre, "primer_apellido": body.primer_apellido,
-                 "segundo_apellido": body.segundo_apellido or None, "correo": body.correo,
-                 "perfil": body.perfil, "gerencia_id": str(body.gerencia_id),
-                 "area_id": str(body.area_id), "cargo_id": str(body.cargo_id),
-                 "tipo_alta": body.tipo_alta, "modulos": modulos, "estado": "ACTIVO"}
-        created = await create_request(
-            uow, tipo="ALTA_USUARIO", entidad="usuario", entidad_id=uid,
-            solicitante_id=p.user_id, motivo=body.motivo,
-            vinculada_id=body.solicitud_vinculada_id,
-            items=[Item(k, None, v) for k, v in nuevo.items()])
+        created, uid = await create_alta(uow, p, body)
         await uow.commit()
     return _out(created, uid)
+
+
+async def _check_tipo_alta(s: AsyncSession, body: "AltaIn") -> None:
+    """DD-02 (definido por delegación): NORMAL = figura en la última planta activa procesada;
+    EXCEPCIONAL = no figura, con motivo obligatorio."""
+    if body.tipo_alta == "EXCEPCIONAL":
+        if not body.motivo or len(body.motivo.strip()) < 10:
+            raise BusinessRuleError("El alta EXCEPCIONAL requiere un motivo (mín. 10 caracteres).")
+        return
+    last = (await s.execute(text(
+        "SELECT id FROM app.ejecucion_th WHERE tipo = 'ACTIVA' AND estado IN "
+        "('COMPLETADA', 'PARCIAL') ORDER BY finalizada_en DESC LIMIT 1"))).scalar()
+    if last is None:
+        return  # aún no hay planta procesada: la regla no puede verificarse
+    found = (await s.execute(text(
+        "SELECT 1 FROM app.resultado_fila_th WHERE ejecucion_id = :e AND resultado <> 'ERROR' "
+        "AND upper(identificacion) = upper(:i)"), {"e": last, "i": body.identificacion})).first()
+    if not found:
+        raise BusinessRuleError(
+            "La identificación no figura en la última planta activa de Talento Humano; "
+            "tramite el alta como EXCEPCIONAL con motivo.")
 
 
 async def _reusable_alta(s: AsyncSession, vinculada_id: uuid.UUID | None) -> uuid.UUID | None:

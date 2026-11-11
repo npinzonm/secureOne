@@ -74,8 +74,8 @@ async def generate(
 
 
 async def notify(uow: UnitOfWork, plantilla: str, origen_id: str,
-                 context: dict[str, Any]) -> None:
-    if await generate(uow.session, plantilla, origen_id, context):
+                 context: dict[str, Any], dedupe: str | None = None) -> None:
+    if await generate(uow.session, plantilla, origen_id, context, dedupe):
         return
     sm = uow.sessionmaker
 

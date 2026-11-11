@@ -13,7 +13,9 @@ RUN pip install -r requirements.txt
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY app ./app
-RUN mkdir -p /var/lib/secureone/spool && chown app:app /var/lib/secureone/spool
+RUN mkdir -p /var/lib/secureone/spool /var/lib/secureone/th \
+ && chown app:app /var/lib/secureone/spool /var/lib/secureone/th \
+ && chmod 700 /var/lib/secureone/th
 USER app
 EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \

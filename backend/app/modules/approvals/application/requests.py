@@ -58,6 +58,7 @@ async def create_request(
     uow: UnitOfWork, *, tipo: str, entidad: str, entidad_id: uuid.UUID,
     solicitante_id: uuid.UUID | None, items: list[Item], motivo: str | None = None,
     origen: str = "MANUAL", vinculada_id: uuid.UUID | None = None,
+    propuesta_version_id: uuid.UUID | None = None,
 ) -> CreatedRequest:
     s = uow.session
     if vinculada_id is not None:
@@ -71,10 +72,11 @@ async def create_request(
         async with s.begin_nested():
             numero = (await s.execute(text(
                 "INSERT INTO app.solicitud (id, tipo, origen, entidad, entidad_id, motivo, "
-                "solicitante_id, solicitud_vinculada_id) VALUES (:id, :t, :o, :e, :ei, :m, :s, :v) "
-                "RETURNING numero"),
+                "solicitante_id, solicitud_vinculada_id, propuesta_version_id) "
+                "VALUES (:id, :t, :o, :e, :ei, :m, :s, :v, :pv) RETURNING numero"),
                 {"id": rid, "t": tipo, "o": origen, "e": entidad, "ei": entidad_id,
-                 "m": motivo, "s": solicitante_id, "v": vinculada_id})).scalar_one()
+                 "m": motivo, "s": solicitante_id, "v": vinculada_id,
+                 "pv": propuesta_version_id})).scalar_one()
     except IntegrityError as exc:  # carrera con otra solicitud pendiente
         raise ConflictError("Ya existe una solicitud pendiente sobre este registro.") from exc
     for orden, it in enumerate(items, start=1):

@@ -2,7 +2,8 @@
 
 Ciclo:
   - cada `worker_poll_seconds`: entregas de notificaciones pendientes (outbox);
-  - cada 60 s: volcado del spool de incidentes de auditoría y cierre de sesiones abandonadas;
+  - cada ciclo: ejecuciones TH pendientes (retirados primero) y luego entregas;
+  - cada 60 s: spool de auditoría, sesiones abandonadas y alerta de archivo diario TH;
   - heartbeat en /tmp/worker-heartbeat para el health check.
 Errores de un ciclo se registran y el worker continúa (nunca se detiene por un fallo puntual).
 """
@@ -22,6 +23,8 @@ from app.kernel.audit import IncidentSpool
 from app.modules.auth.application.maintenance import close_abandoned_sessions
 from app.modules.auth.infrastructure.session_store import SessionStore
 from app.modules.notifications.application.delivery import SmtpSender, process_batch
+from app.modules.th.application.intake import check_missing_daily_file
+from app.modules.th.application.processor import process_next
 
 logger = logging.getLogger("secureone.worker")
 HEARTBEAT = Path("/tmp/worker-heartbeat")  # noqa: S108 - tmpfs del contenedor
@@ -48,6 +51,10 @@ async def run() -> None:
     try:
         while not stop.is_set():
             try:
+                # TH primero (retirados antes que activa); hasta 5 ejecuciones por ciclo.
+                for _ in range(5):
+                    if not await process_next(db.sessionmaker, spool):
+                        break
                 r = await process_batch(db.sessionmaker, sender)
                 if r.enviadas or r.reintentos or r.agotadas:
                     logger.info("entregas: %d enviadas, %d reintentos, %d agotadas",
@@ -56,6 +63,7 @@ async def run() -> None:
                     n = await spool.flush(db.sessionmaker)
                     c = await close_abandoned_sessions(db.sessionmaker, store, spool,
                                                        settings.session_idle_seconds)
+                    await check_missing_daily_file(db.sessionmaker, spool)
                     if n or c:
                         logger.info("mantenimiento: %d incidentes volcados, %d sesiones cerradas",
                                     n, c)

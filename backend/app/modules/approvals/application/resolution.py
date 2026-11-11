@@ -234,6 +234,12 @@ async def _apply_reactivacion(uow, sol, u, approver, settings) -> str:
 async def approve(uow: UnitOfWork, rid: uuid.UUID, approver: uuid.UUID, settings: Settings,
                   store: SessionStore, comentario: str | None) -> Resolution:
     sol = await _lock_pending(uow, rid)
+    if sol.get("propuesta_version_id"):  # REQ-APR-07: solo la última versión TH es aprobable
+        vigente = (await uow.session.execute(text(
+            "SELECT vigente FROM app.propuesta_th_version WHERE id = :v"),
+            {"v": sol["propuesta_version_id"]})).scalar()
+        if not vigente:
+            raise ConflictError("La propuesta de TH tiene una versión más reciente.")
     items = await _items(uow, rid)
     u = await load_user(uow.session, sol["entidad_id"])
     temp = None

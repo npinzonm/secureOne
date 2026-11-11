@@ -59,6 +59,8 @@ class Settings(BaseSettings):
     smtp_starttls: bool = False
     smtp_timeout_seconds: float = 10.0
     worker_poll_seconds: float = 5.0
+    # Archivos TH en tránsito (DD-05): volumen temporal; se eliminan al procesarse.
+    th_dir: str = "/var/lib/secureone/th"
 
     @property
     def postgres_dsn(self) -> str:

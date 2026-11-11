@@ -56,6 +56,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-secureone@localhost.test}
     volumes:
       - spool:/var/lib/secureone/spool
+      - thfiles:/var/lib/secureone/th
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
@@ -84,6 +85,7 @@ services:
       SMTP_FROM: ${SMTP_FROM:-secureone@localhost.test}
     volumes:
       - spool:/var/lib/secureone/spool
+      - thfiles:/var/lib/secureone/th   # archivos TH en tránsito (se eliminan al procesarse)
     healthcheck:
       test: ["CMD", "python", "-m", "app.worker", "healthcheck"]
       interval: 15s
@@ -178,3 +180,4 @@ volumes:
   pgdata: {}
   redisdata: {}
   spool: {}
+  thfiles: {}
