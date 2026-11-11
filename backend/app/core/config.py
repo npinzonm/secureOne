@@ -50,6 +50,18 @@ class Settings(BaseSettings):
     password_history: int = 5                    # P §5: últimas cinco
     refresh_cookie_secure: bool = True           # PD-18/PD-20
 
+    # Correo (PD-11 PROPUESTO): SMTP configurable; Mailpit en el prototipo local.
+    smtp_host: str = "mailpit"
+    smtp_port: int = 1025
+    smtp_from: str = "secureone@localhost.test"
+    smtp_user: str | None = None
+    smtp_password: SecretStr | None = None
+    smtp_starttls: bool = False
+    smtp_timeout_seconds: float = 10.0
+    worker_poll_seconds: float = 5.0
+    # Archivos TH en tránsito (DD-05): volumen temporal; se eliminan al procesarse.
+    th_dir: str = "/var/lib/secureone/th"
+
     @property
     def postgres_dsn(self) -> str:
         """DSN libpq del rol de runtime (psycopg directo)."""

@@ -15,6 +15,8 @@
 
 Las secciones de estas decisiones más abajo se conservan como justificación; su estado es **APROBADO**.
 
+**Definidas por delegación (2026-11-10):** PD-07, PD-08, PD-09, PD-10, PD-11 y PD-22 → ver [06-definiciones-delegadas.md](06-definiciones-delegadas.md) (DD-01..DD-07). Son vinculantes para v1.0, pero deben revisarse con el contrato real de TH y con una especificación UX cuando existan.
+
 ## Resumen y prioridad de respuesta
 
 | ID | Tema | Bloquea | Prioridad de respuesta |

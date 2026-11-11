@@ -7,13 +7,15 @@ Las operaciones que modifican usuarios llegan en la Fase 5 (PD-05).
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel
+from fastapi.responses import Response
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 
 from app.core.errors import NotFoundError
+from app.core.excel import MAX_EXPORT_ROWS, build_xlsx, xlsx_response
 from app.kernel.audit import AuditEntry
 from app.kernel.authz import require
 from app.kernel.unit_of_work import UnitOfWork
@@ -70,42 +72,54 @@ def _like(value: str) -> str:
     return f"%{escaped}%"
 
 
+class UserFilter(BaseModel):
+    """Filtros aprobados de la consulta central (P §6.1, REQ-USER-10)."""
+
+    model_config = ConfigDict(extra="forbid")
+    nombre: str | None = Field(None, max_length=100, description="Nombre o apellidos")
+    usuario_red: str | None = Field(None, max_length=16)
+    identificacion: str | None = Field(None, max_length=20)
+    correo: str | None = Field(None, max_length=150)
+    gerencia_id: uuid.UUID | None = None
+    area_id: uuid.UUID | None = None
+    cargo_id: uuid.UUID | None = None
+    estado: Literal["PENDIENTE_ALTA", "ACTIVO", "INACTIVO"] | None = None
+    tipo_alta: Literal["NORMAL", "EXCEPCIONAL"] | None = None
+
+    def sql(self) -> tuple[str, dict[str, Any]]:
+        where = """
+         WHERE (CAST(:nombre AS text) IS NULL
+                OR (u.nombre || ' ' || u.primer_apellido || ' ' || coalesce(u.segundo_apellido, ''))
+                   ILIKE :nombre)
+           AND (CAST(:red AS text) IS NULL OR u.usuario_red ILIKE :red)
+           AND (CAST(:ident AS text) IS NULL OR u.identificacion ILIKE :ident)
+           AND (CAST(:correo AS text) IS NULL OR u.correo ILIKE :correo)
+           AND (CAST(:g AS uuid) IS NULL OR u.gerencia_id = :g)
+           AND (CAST(:a AS uuid) IS NULL OR u.area_id = :a)
+           AND (CAST(:c AS uuid) IS NULL OR u.cargo_id = :c)
+           AND (CAST(:estado AS text) IS NULL OR u.estado = :estado)
+           AND (CAST(:tipo AS text) IS NULL OR u.tipo_alta = :tipo)
+        """
+        params = {
+            "nombre": _like(self.nombre) if self.nombre else None,
+            "red": _like(self.usuario_red.strip().lower()) if self.usuario_red else None,
+            "ident": _like(self.identificacion) if self.identificacion else None,
+            "correo": _like(self.correo) if self.correo else None,
+            "g": self.gerencia_id, "a": self.area_id, "c": self.cargo_id,
+            "estado": self.estado, "tipo": self.tipo_alta,
+        }
+        return where, params
+
+
 @router.get("/admin/users", response_model=UsuariosPage)
 async def list_users(
-    nombre: str | None = Query(None, max_length=100, description="Nombre o apellidos"),
-    usuario_red: str | None = Query(None, max_length=16),
-    identificacion: str | None = Query(None, max_length=20),
-    correo: str | None = Query(None, max_length=150),
-    gerencia_id: uuid.UUID | None = None,
-    area_id: uuid.UUID | None = None,
-    cargo_id: uuid.UUID | None = None,
-    estado: Literal["PENDIENTE_ALTA", "ACTIVO", "INACTIVO"] | None = None,
-    tipo_alta: Literal["NORMAL", "EXCEPCIONAL"] | None = None,
+    f: UserFilter = Depends(),  # noqa: B008
     page: int = Query(1, ge=1),
     page_size: int = Query(25, ge=1, le=100),
     _: Principal = Depends(require("ADM.USUARIO.CONSULTA")),  # noqa: B008
     auth: AuthService = Depends(get_auth_service),  # noqa: B008
 ) -> UsuariosPage:
-    where = """
-     WHERE (CAST(:nombre AS text) IS NULL
-            OR (u.nombre || ' ' || u.primer_apellido || ' ' || coalesce(u.segundo_apellido, ''))
-               ILIKE :nombre)
-       AND (CAST(:red AS text) IS NULL OR u.usuario_red ILIKE :red)
-       AND (CAST(:ident AS text) IS NULL OR u.identificacion ILIKE :ident)
-       AND (CAST(:correo AS text) IS NULL OR u.correo ILIKE :correo)
-       AND (CAST(:g AS uuid) IS NULL OR u.gerencia_id = :g)
-       AND (CAST(:a AS uuid) IS NULL OR u.area_id = :a)
-       AND (CAST(:c AS uuid) IS NULL OR u.cargo_id = :c)
-       AND (CAST(:estado AS text) IS NULL OR u.estado = :estado)
-       AND (CAST(:tipo AS text) IS NULL OR u.tipo_alta = :tipo)
-    """
-    params = {
-        "nombre": _like(nombre) if nombre else None,
-        "red": _like(usuario_red.strip().lower()) if usuario_red else None,
-        "ident": _like(identificacion) if identificacion else None,
-        "correo": _like(correo) if correo else None,
-        "g": gerencia_id, "a": area_id, "c": cargo_id, "estado": estado, "tipo": tipo_alta,
-    }
+    where, params = f.sql()
     async with auth.sm() as s:
         total = (await s.execute(text(f"SELECT count(*) FROM app.usuario u {where}"),  # noqa: S608
                                  params)).scalar_one()
@@ -115,6 +129,37 @@ async def list_users(
         )).mappings().all()
     return UsuariosPage(items=[UsuarioOut(**r) for r in rows], total=total,
                         page=page, page_size=page_size)
+
+
+EXPORT_COLUMNS = ("usuario_red", "identificacion", "nombre", "primer_apellido",
+                  "segundo_apellido", "correo", "perfil_codigo", "gerencia", "area", "cargo",
+                  "codigo_cargo", "tipo_alta", "estado", "ultimo_ingreso")
+
+
+@router.post("/admin/users/export")
+async def export_users(
+    f: UserFilter, request: Request,
+    p: Principal = Depends(require("ADM.USUARIO.EXPORTACION")),  # noqa: B008
+    auth: AuthService = Depends(get_auth_service),  # noqa: B008
+) -> Response:
+    """CU-USR-07 / REQ-USER-11: exportación Excel de lo filtrado, auditada; solo campos
+    aprobados (REQ-USER-03)."""
+    where, params = f.sql()
+    async with auth.sm() as s:
+        rows = (await s.execute(
+            text(f"{_USER_SELECT} {where} ORDER BY u.usuario_red LIMIT :lim"),  # noqa: S608
+            {**params, "lim": MAX_EXPORT_ROWS + 1})).mappings().all()
+    truncated = len(rows) > MAX_EXPORT_ROWS
+    rows = rows[:MAX_EXPORT_ROWS]
+    async with UnitOfWork(auth.sm, audit_context(request, p), auth.spool) as uow:
+        uow.audit(AuditEntry(categoria="EXPORTACION", accion="USR_EXPORTED", modulo="ADM",
+                             entidad="usuario",
+                             detalle={"filtros": f.model_dump(mode="json", exclude_none=True),
+                                      "filas": len(rows), "truncado": truncated}))
+        await uow.commit()
+    content = build_xlsx("usuarios", EXPORT_COLUMNS,
+                         ([r[c] for c in EXPORT_COLUMNS] for r in rows))
+    return xlsx_response(content, "secureone-usuarios.xlsx", truncated)
 
 
 class UsuarioDetalleOut(UsuarioOut):
@@ -194,3 +239,79 @@ async def get_user_activity(
         sesion_activa=any(x["finalizada_en"] is None for x in sesiones),
         sesiones=[SesionOut(**x) for x in sesiones],
     )
+
+
+class HistItemOut(BaseModel):
+    atributo: str
+    valor_anterior: Any
+    valor_nuevo: Any
+
+
+class HistSolicitudOut(BaseModel):
+    numero: int
+    tipo: str
+    estado: str
+    motivo: str | None
+    creada_en: datetime
+    solicitante: str | None
+    resuelta_en: datetime | None
+    resuelta_por: str | None
+    motivo_resolucion: str | None
+    solicitud_vinculada: int | None
+    items: list[HistItemOut]
+
+
+class HistEstadoOut(BaseModel):
+    estado_anterior: str | None
+    estado_nuevo: str
+    motivo: str
+    actor: str | None
+    solicitud: int | None
+    ocurrido_en: datetime
+
+
+class HistorialOut(BaseModel):
+    solicitudes: list[HistSolicitudOut]
+    estados: list[HistEstadoOut]
+
+
+@router.get("/admin/users/{user_id}/history", response_model=HistorialOut)
+async def get_user_history(
+    user_id: uuid.UUID,
+    _: Principal = Depends(require("ADM.USUARIO.CONSULTA")),  # noqa: B008
+    auth: AuthService = Depends(get_auth_service),  # noqa: B008
+) -> HistorialOut:
+    """REQ-USER-08 / D-APR-002: historial por atributo (ítems de cada solicitud con su
+    resolución) e historial de estados con actor, fecha y motivo."""
+    async with auth.sm() as s:
+        if not (await s.execute(text("SELECT 1 FROM app.usuario WHERE id = :u"),
+                                {"u": user_id})).first():
+            raise NotFoundError()
+        sols = (await s.execute(text(
+            "SELECT so.id, so.numero, so.tipo, so.estado, so.motivo, so.creada_en, "
+            "us.usuario_red AS solicitante, so.resuelta_en, ur.usuario_red AS resuelta_por, "
+            "so.motivo_resolucion, sv.numero AS solicitud_vinculada "
+            "FROM app.solicitud so LEFT JOIN app.usuario us ON us.id = so.solicitante_id "
+            "LEFT JOIN app.usuario ur ON ur.id = so.resuelta_por_id "
+            "LEFT JOIN app.solicitud sv ON sv.id = so.solicitud_vinculada_id "
+            "WHERE so.entidad = 'usuario' AND so.entidad_id = :u ORDER BY so.numero"),
+            {"u": user_id})).mappings().all()
+        items = (await s.execute(text(
+            "SELECT solicitud_id, atributo, valor_anterior, valor_nuevo FROM app.solicitud_item "
+            "WHERE solicitud_id = ANY(:ids) ORDER BY orden"),
+            {"ids": [x["id"] for x in sols]})).mappings().all()
+        estados = (await s.execute(text(
+            "SELECT h.estado_anterior, h.estado_nuevo, h.motivo, a.usuario_red AS actor, "
+            "so.numero AS solicitud, h.ocurrido_en FROM app.usuario_estado_historial h "
+            "LEFT JOIN app.usuario a ON a.id = h.actor_id "
+            "LEFT JOIN app.solicitud so ON so.id = h.solicitud_id "
+            "WHERE h.usuario_id = :u ORDER BY h.ocurrido_en"), {"u": user_id})).mappings().all()
+    by_sol: dict[uuid.UUID, list[HistItemOut]] = {}
+    for it in items:
+        by_sol.setdefault(it["solicitud_id"], []).append(HistItemOut(
+            atributo=it["atributo"], valor_anterior=it["valor_anterior"],
+            valor_nuevo=it["valor_nuevo"]))
+    return HistorialOut(
+        solicitudes=[HistSolicitudOut(**{k: v for k, v in x.items() if k != "id"},
+                                      items=by_sol.get(x["id"], [])) for x in sols],
+        estados=[HistEstadoOut(**e) for e in estados])

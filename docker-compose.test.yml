@@ -1,10 +1,16 @@
 # Ambiente de pruebas aislado: datos efímeros (tmpfs), imagen backend con dependencias de test.
 # Uso: docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml up -d --build
 services:
+  mailpit:
+    ports: !override
+      - "127.0.0.1:${TEST_MAILPIT_UI_PORT:-8026}:8025"
   nginx:
     ports: !override
       - "127.0.0.1:${TEST_HTTP_PORT:-8081}:8080"
   backend:
+    networks: [edge, data, mail]   # las pruebas de integración consultan la API de Mailpit
+    depends_on:
+      mailpit: { condition: service_healthy }
     build: { context: ./backend, target: dev }
     image: secureone/backend:test
     environment:

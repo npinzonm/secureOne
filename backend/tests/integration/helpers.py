@@ -80,3 +80,27 @@ def token(c: TestClient, red: str, password: str = PWD) -> str:
 
 def bearer(tok: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {tok}"}
+
+
+def make_org(owner) -> dict[str, str]:
+    """Catálogos org de prueba (en el sistema real solo llegan desde TH)."""
+    sfx = uuid.uuid4().hex[:6]
+    g = owner.execute("INSERT INTO app.gerencia (codigo, nombre) VALUES (%s, 'G') RETURNING id",
+                      (f"G{sfx}",)).fetchone()[0]
+    g2 = owner.execute("INSERT INTO app.gerencia (codigo, nombre) VALUES (%s, 'G2') RETURNING id",
+                       (f"H{sfx}",)).fetchone()[0]
+    a = owner.execute("INSERT INTO app.area (codigo, nombre, gerencia_id) VALUES (%s, 'A', %s) "
+                      "RETURNING id", (f"A{sfx}", g)).fetchone()[0]
+    c = owner.execute("INSERT INTO app.cargo (codigo_cargo, nombre) VALUES (%s, 'C') RETURNING id",
+                      (int(uuid.uuid4().int % 10**8) + 1,)).fetchone()[0]
+    return {"gerencia_id": str(g), "area_id": str(a), "cargo_id": str(c),
+            "otra_gerencia": str(g2)}
+
+
+def alta_body(org: dict[str, str], **over) -> dict:
+    ensure_ok = {"usuario_red": rand_red().upper(), "identificacion": uuid.uuid4().hex[:12],
+                 "nombre": "Ana", "primer_apellido": "Pérez", "correo": "ana@example.org",
+                 "perfil": "PRUEBA_FUNCIONAL", "gerencia_id": org["gerencia_id"],
+                 "area_id": org["area_id"], "cargo_id": org["cargo_id"],
+                 "tipo_alta": "NORMAL", "modulos": ["IND"]}
+    return {**ensure_ok, **over}

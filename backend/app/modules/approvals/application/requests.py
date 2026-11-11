@@ -12,10 +12,11 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ConflictError
+from app.core.errors import BusinessRuleError, ConflictError
 from app.core.ids import uuid7
 from app.kernel.audit import AuditEntry
 from app.kernel.unit_of_work import UnitOfWork
+from app.modules.notifications.application.outbox import notify, request_context
 
 
 @dataclass(frozen=True)
@@ -39,12 +40,29 @@ async def pending_for(s: AsyncSession, entidad: str, entidad_id: uuid.UUID) -> i
         "AND estado = 'PENDIENTE'"), {"e": entidad, "i": entidad_id})).scalar()
 
 
+async def validate_link(s: AsyncSession, vinculada_id: uuid.UUID, entidad: str,
+                        entidad_id: uuid.UUID) -> dict[str, Any]:
+    """REQ-APR-06: una corrección se vincula a una solicitud CANCELADA o RECHAZADA de la misma
+    entidad (la original no se modifica)."""
+    link = (await s.execute(text(
+        "SELECT tipo, estado, entidad, entidad_id FROM app.solicitud WHERE id = :i"),
+        {"i": vinculada_id})).mappings().first()
+    if link is None or link["entidad"] != entidad or link["entidad_id"] != entidad_id:
+        raise BusinessRuleError("La solicitud vinculada no existe o es de otra entidad.")
+    if link["estado"] not in ("CANCELADA", "RECHAZADA"):
+        raise BusinessRuleError("Solo se vincula a una solicitud cancelada o rechazada.")
+    return dict(link)
+
+
 async def create_request(
     uow: UnitOfWork, *, tipo: str, entidad: str, entidad_id: uuid.UUID,
     solicitante_id: uuid.UUID | None, items: list[Item], motivo: str | None = None,
     origen: str = "MANUAL", vinculada_id: uuid.UUID | None = None,
+    propuesta_version_id: uuid.UUID | None = None,
 ) -> CreatedRequest:
     s = uow.session
+    if vinculada_id is not None:
+        await validate_link(s, vinculada_id, entidad, entidad_id)
     existing = await pending_for(s, entidad, entidad_id)
     if existing is not None:
         raise ConflictError("Ya existe una solicitud pendiente sobre este registro.",
@@ -54,10 +72,11 @@ async def create_request(
         async with s.begin_nested():
             numero = (await s.execute(text(
                 "INSERT INTO app.solicitud (id, tipo, origen, entidad, entidad_id, motivo, "
-                "solicitante_id, solicitud_vinculada_id) VALUES (:id, :t, :o, :e, :ei, :m, :s, :v) "
-                "RETURNING numero"),
+                "solicitante_id, solicitud_vinculada_id, propuesta_version_id) "
+                "VALUES (:id, :t, :o, :e, :ei, :m, :s, :v, :pv) RETURNING numero"),
                 {"id": rid, "t": tipo, "o": origen, "e": entidad, "ei": entidad_id,
-                 "m": motivo, "s": solicitante_id, "v": vinculada_id})).scalar_one()
+                 "m": motivo, "s": solicitante_id, "v": vinculada_id,
+                 "pv": propuesta_version_id})).scalar_one()
     except IntegrityError as exc:  # carrera con otra solicitud pendiente
         raise ConflictError("Ya existe una solicitud pendiente sobre este registro.") from exc
     for orden, it in enumerate(items, start=1):
@@ -74,6 +93,9 @@ async def create_request(
         detalle={"numero": numero, "tipo": tipo, "entidad": entidad,
                  "entidad_id": str(entidad_id)},
     ))
+    # REQ-APR-08: ambos administradores reciben la notificación (outbox, D-NOT-001).
+    actor = uow.ctx.actor_usuario_red or ("Talento Humano" if origen == "TH" else None)
+    await notify(uow, "APR_REQUEST_CREATED", str(rid), await request_context(s, rid, actor))
     return CreatedRequest(rid, numero, tipo)
 
 

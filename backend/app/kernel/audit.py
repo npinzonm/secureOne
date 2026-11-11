@@ -184,6 +184,12 @@ class IncidentSpool:
                     ),
                     AuditContext.system(),
                 )
+                # Notificación a los administradores (import local: evita ciclo de módulos).
+                from app.modules.notifications.application.outbox import generate
+
+                await generate(session, "OPS_AUDIT_OUTAGE", incidents[0].get("ts") or "-", {
+                    "incidentes": len(incidents), "desde": incidents[0].get("ts"),
+                    "hasta": incidents[-1].get("ts")})
         for f in files:
             f.unlink(missing_ok=True)
         return len(incidents)
