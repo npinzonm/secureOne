@@ -32,6 +32,19 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+  security:
+    # Auditoría de dependencias con vulnerabilidades conocidas (REQ-RNF-01, Fase 10).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pip-audit==2.7.3 && pip-audit -r backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci && npm audit --audit-level=high
+        working-directory: frontend
+
   stack:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
@@ -48,3 +61,17 @@ jobs:
         run: |
           docker compose down -v
           docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml down -v
+
+  e2e-and-backups:
+    # E2E de navegador (Playwright en contenedor) y prueba de rotación/restauración de respaldos.
+    runs-on: ubuntu-latest
+    needs: [stack]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/init-env.sh
+      - run: make test-e2e
+      - run: make test-backups
+      - if: failure()
+        run: docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml logs --no-color
+      - if: always()
+        run: docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml down -v
