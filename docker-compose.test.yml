@@ -2,6 +2,8 @@
 # Uso: docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml up -d --build
 services:
   backup:
+    environment:
+      BACKUP_HOUR: "off"  # las pruebas disparan los respaldos explícitamente
     volumes: !override
       - backups_test:/backups
   mailpit:
