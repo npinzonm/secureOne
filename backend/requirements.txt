@@ -1,5 +1,6 @@
 # Dependencias de ejecución (versiones fijadas).
-fastapi==0.115.6
+fastapi==0.162.0
+starlette==1.10.0  # fijada: corrige 7 vulnerabilidades (Fase 10)
 uvicorn[standard]==0.34.0
 pydantic-settings==2.7.1
 psycopg[binary]==3.2.3
@@ -7,6 +8,6 @@ redis==5.2.1
 sqlalchemy==2.0.36
 alembic==1.14.0
 argon2-cffi==23.1.0
-PyJWT==2.10.1
+PyJWT==2.15.1
 openpyxl==3.1.5
-python-multipart==0.0.20
+python-multipart==0.0.32

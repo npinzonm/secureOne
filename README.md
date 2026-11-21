@@ -3,7 +3,7 @@
 Plataforma modular de Seguridad de la Información y Ciberseguridad.
 Stack: Next.js · FastAPI · PostgreSQL · Redis · Nginx · Docker Compose · GitHub Actions.
 
-> Estado: **Fases 1–9 implementadas** (backend completo de v1.0, integración TH y frontend funcional). Las definiciones de TH y UX se tomaron **por delegación** ([docs/06](docs/06-definiciones-delegadas.md)). Pendiente: Fase 10 (E2E automatizadas, respaldos y endurecimiento).
+> Estado: **Fases 1–10 implementadas** (backend completo de v1.0, integración TH, frontend funcional, E2E de navegador, respaldos/restauración y endurecimiento). Las definiciones de TH y UX se tomaron **por delegación** ([docs/06](docs/06-definiciones-delegadas.md)). Operación: [docs/operacion/MANUAL-OPERACION.md](docs/operacion/MANUAL-OPERACION.md). Trazabilidad: [docs/trazabilidad.csv](docs/trazabilidad.csv).
 > El diseño técnico (PROPUESTO, pendiente de validación) está en [`docs/`](docs/00-README.md).
 
 ## Requisitos
@@ -30,6 +30,9 @@ Abrir: <http://127.0.0.1:8080> e iniciar sesión con un administrador creado con
 | Verificar integridad de la auditoría | `make audit-verify` |
 | Volcar incidentes de auditoría pendientes | `docker compose exec backend python -m app.cli flush-incidents` |
 | Ambiente de pruebas aislado (puerto 8081, datos efímeros) | `make test-stack` y luego `make test-stack-down` |
+| E2E de navegador (Playwright) / prueba de respaldos | `make test-e2e` / `make test-backups` |
+| Respaldo manual / actualización con respaldo previo | `make backup LABEL=motivo` / `make update` |
+| Restaurar un respaldo (reemplaza la BD) | `make restore FILE=backups/daily/AAAA-MM-DD.dump` |
 
 **Borrar todos los datos locales** (irreversible): `docker compose down -v`.
 
@@ -79,9 +82,10 @@ La sesión se cierra tras 15 min sin actividad; solo hay una sesión activa por 
 backend/     FastAPI (app/, tests/)
 frontend/    Next.js (src/app)
 infra/nginx/ Proxy inverso
-scripts/     init-env.sh, smoke.sh
+infra/backup/ Servicio de respaldos (pg_dump, rotación 7/4/3)
+scripts/     init-env.sh, smoke.sh, restore.sh, test-e2e.sh, test-backups.sh
 docs/        Diseño técnico, especificaciones y fases
 ```
 
-## Pendiente en fases siguientes
-Fase 10: pruebas E2E de navegador, respaldo/restauración, endurecimiento · respaldo y restauración (Fase 10) · TLS local (PD-20).
+## Pendiente (fuera de v1.0 o por decidir)
+TLS local (PD-20) · cifrado de respaldos · RPO/RTO (REQ-RNF-12) · reglas de Indicium Insight (D-IND-001) · validación de DD-01..DD-07 con TH y UX.

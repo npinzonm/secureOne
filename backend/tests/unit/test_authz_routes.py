@@ -1,10 +1,10 @@
 """T-SEC-00: toda ruta no pública declara una guarda; códigos de permiso válidos."""
 
 import pytest
-from fastapi.routing import APIRoute
 
 from app.kernel.authz import require
 from app.main import create_app
+from tests.route_utils import MIN_EXPECTED_ROUTES, api_routes
 
 PUBLIC = {
     ("GET", "/api/v1/health/live"),
@@ -39,11 +39,20 @@ def _markers(dependant) -> tuple[set[str], bool]:
     return perms, session
 
 
+class _R:
+    def __init__(self, dependant):
+        self.dependant = dependant
+
+
 def _routes():
-    for r in create_app(with_lifespan=False).routes:
-        if isinstance(r, APIRoute):
-            for m in r.methods - {"HEAD", "OPTIONS"}:
-                yield m, r.path, r
+    for path, methods, dependant in api_routes(create_app(with_lifespan=False)):
+        for m in methods - {"HEAD", "OPTIONS"}:
+            yield m, path, _R(dependant)
+
+
+def test_route_discovery_is_not_empty():
+    """Si el framework cambia cómo expone las rutas, T-SEC-00 no debe pasar en vacío."""
+    assert len(list(_routes())) >= MIN_EXPECTED_ROUTES
 
 
 def test_every_non_public_route_is_guarded():

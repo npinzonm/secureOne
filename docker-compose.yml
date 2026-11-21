@@ -98,6 +98,24 @@ services:
       mailpit: { condition: service_healthy }
     networks: [data, mail]
 
+  # Respaldos automáticos (REQ-RNF-08 / M §15): diario a BACKUP_HOUR; rotación 7/4/3.
+  backup:
+    <<: *hardening
+    build: { context: ./infra/backup }
+    image: secureone/backup:local
+    environment:
+      PGHOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB requerido}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER requerido}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requerido}
+      BACKUP_HOUR: ${BACKUP_HOUR:-02}
+      TZ: ${BACKUP_TZ:-America/Bogota}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [data]
+
   # SMTP local del prototipo (v1.0 sin integraciones corporativas obligatorias; PD-11).
   # UI solo en 127.0.0.1:8025.
   mailpit:

@@ -5,7 +5,6 @@ import uuid
 from contextlib import contextmanager
 
 import pytest
-from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.core.config import get_settings
@@ -20,6 +19,7 @@ from tests.integration.helpers import (
     make_user,
     token,
 )
+from tests.route_utils import api_routes
 
 pytestmark = pytest.mark.integration
 S = get_settings()
@@ -38,15 +38,15 @@ def protected_admin_routes() -> list[tuple[str, str, str]]:
     La guarda se resuelve antes que el cuerpo, así que un cuerpo vacío basta para 401/403.
     """
     out = []
-    for r in create_app(with_lifespan=False).routes:
-        if isinstance(r, APIRoute) and r.path.startswith("/api/v1/admin/"):
-            stack, perm = list(r.dependant.dependencies), None
+    for rpath, methods, dependant in api_routes(create_app(with_lifespan=False)):
+        if rpath.startswith("/api/v1/admin/"):
+            stack, perm = list(dependant.dependencies), None
             while stack:
                 d = stack.pop()
                 perm = perm or getattr(d.call, "__secureone_permission__", None)
                 stack.extend(d.dependencies)
-            path = re.sub(r"\{[a-z_]+\}", str(uuid.uuid4()), r.path)
-            for m in sorted(r.methods - {"HEAD", "OPTIONS"}):
+            path = re.sub(r"\{[a-z_]+\}", str(uuid.uuid4()), rpath)
+            for m in sorted(methods - {"HEAD", "OPTIONS"}):
                 out.append((m, path, perm))
     assert len(out) >= 40
     return out

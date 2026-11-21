@@ -1,6 +1,9 @@
 # Ambiente de pruebas aislado: datos efímeros (tmpfs), imagen backend con dependencias de test.
 # Uso: docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml up -d --build
 services:
+  backup:
+    volumes: !override
+      - backups_test:/backups
   mailpit:
     ports: !override
       - "127.0.0.1:${TEST_MAILPIT_UI_PORT:-8026}:8025"
@@ -29,3 +32,6 @@ services:
     volumes: !override
       - type: tmpfs
         target: /data
+
+volumes:
+  backups_test: {}
