@@ -53,6 +53,25 @@ async def my_inbox(
     return BandejaOut(items=[BandejaItem(**r) for r in rows], no_leidas=unread)
 
 
+class ConteoOut(BaseModel):
+    no_leidas: int
+
+
+@router.get("/notifications/count", response_model=ConteoOut)
+async def unread_count(
+    p: Principal = Depends(require_session(touch=False)),  # noqa: B008
+    auth: AuthService = Depends(get_auth_service),  # noqa: B008
+) -> ConteoOut:
+    """Para la campana de la UI. NO cuenta como actividad (touch=False): un sondeo periódico
+    no debe impedir el cierre por inactividad (REQ-AUTH-08)."""
+    async with auth.sm() as s:
+        n = (await s.execute(text(
+            "SELECT count(*) FROM ops.entrega_notificacion WHERE usuario_id = :u "
+            "AND canal = 'BANDEJA' AND estado = 'ENVIADA' AND leida_en IS NULL"),
+            {"u": p.user_id})).scalar_one()
+    return ConteoOut(no_leidas=n)
+
+
 @router.post("/notifications/{delivery_id}/read", status_code=204)
 async def mark_read(
     delivery_id: uuid.UUID,
