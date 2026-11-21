@@ -88,9 +88,16 @@ manual() {
 
 daemon() {
   hour="${BACKUP_HOUR:-02}"
-  log "servicio de respaldos iniciado (diario a las ${hour}:00, TZ=${TZ:-UTC})"
+  if [ "$hour" = "off" ]; then
+    # Solo ambiente de pruebas: sin respaldo automático, para que las pruebas de rotación
+    # no compitan con el respaldo diario real.
+    log "servicio de respaldos iniciado SIN respaldo automático (BACKUP_HOUR=off)"
+  else
+    log "servicio de respaldos iniciado (diario a las ${hour}:00, TZ=${TZ:-UTC})"
+  fi
   while true; do
     date +%s > /tmp/backup-alive
+    [ "$hour" = "off" ] && { sleep 60; continue; }
     today=$(date +%F)
     if [ "$(date +%H)" -ge "$hour" ] && [ ! -f "$BASE/daily/$today.dump" ]; then
       daily || log "ERROR: el respaldo diario falló; se reintentará en el próximo ciclo"

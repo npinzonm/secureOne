@@ -12,6 +12,7 @@ q() { dc exec -T postgres sh -c "psql -tA -U \"\$POSTGRES_USER\" -d \"\$POSTGRES
 fail=0
 check() { if [[ "$2" == "$3" ]]; then echo "OK   $1 ($3)"; else echo "FAIL $1 (esperado $2, obtenido $3)"; fail=1; fi; }
 
+T_START=$(q "SELECT date_trunc('second', now())" | tr -d '\r')  # los conteos se limitan a esta ejecución
 # Volumen EFÍMERO de pruebas (backups_test): se vacían solo los archivos de respaldo.
 dc exec -T backup find /backups -type f \( -name '*.dump' -o -name '*.dump.sha256' \) -delete
 # 100 días desde el 2026-01-01 (incluye 14 domingos y 4 días 1).
@@ -27,11 +28,12 @@ check "últimos diarios"    "2026-04-04.dump 2026-04-10.dump" \
 check "mensuales vigentes" "2026-02.dump 2026-03.dump 2026-04.dump" \
   "$(dc exec -T backup sh -c 'ls /backups/monthly | grep dump$ | xargs')"
 check "checksums presentes" 0 "$(dc exec -T backup sh -c 'for f in /backups/*/*.dump; do [ -f "$f.sha256" ] || echo x; done | wc -l' | tr -d ' ')"
-check "registro respaldos (100 días simulados)" 100 "$(q "SELECT count(*) FROM ops.registro_respaldo WHERE tipo='DIARIO' AND resultado='EXITO' AND archivo BETWEEN '/backups/daily/2026-01-01' AND '/backups/daily/2026-04-11'")"
-check "auditoría OPS_BACKUP_CREATED >= 118" t "$(q "SELECT count(*) >= 118 FROM audit.evento WHERE accion='OPS_BACKUP_CREATED'")"
+check "registro respaldos (100 días simulados)" 100 "$(q "SELECT count(*) FROM ops.registro_respaldo WHERE tipo='DIARIO' AND resultado='EXITO' AND inicio >= '$T_START' AND archivo BETWEEN '/backups/daily/2026-01-01' AND '/backups/daily/2026-04-11'")"
+check "auditoría OPS_BACKUP_CREATED >= 118" t "$(q "SELECT count(*) >= 118 FROM audit.evento WHERE accion='OPS_BACKUP_CREATED' AND ocurrido_en >= '$T_START'")"
 
-# Restauración
-q "INSERT INTO app.gerencia (codigo, nombre) VALUES ('RESTORE-A', 'Antes del respaldo')" >/dev/null
+# Restauración (los conteos se limitan a esta ejecución: el stack de pruebas puede reutilizarse)
+T0=$(q "SELECT date_trunc('second', now())" | tr -d '\r')
+q "INSERT INTO app.gerencia (codigo, nombre) VALUES ('RESTORE-A', 'Antes del respaldo') ON CONFLICT DO NOTHING" >/dev/null
 dc exec -T backup backup.sh manual prueba-restauracion >/dev/null
 DUMP=$(dc exec -T backup sh -c 'ls -1 /backups/manual/*prueba-restauracion.dump | tail -1' | tr -d '\r')
 q "INSERT INTO app.gerencia (codigo, nombre) VALUES ('RESTORE-B', 'Después del respaldo')" >/dev/null
@@ -43,13 +45,14 @@ dc exec -T backup restore.sh /backups/manual/alterado.dump --yes >/dev/null 2>&1
 check "checksum alterado rechazado (rc)" 3 "$?"
 check "sin restaurar tras rechazo" 1 "$(q "SELECT count(*) FROM app.gerencia WHERE codigo='RESTORE-B'")"
 
-YES=1 COMPOSE_ARGS="${ARGS[*]}" ./scripts/restore.sh "$DUMP" >"${RESTORE_LOG:=$(mktemp)}" 2>&1
+RESTORE_LOG=$(mktemp)
+YES=1 COMPOSE_ARGS="${ARGS[*]}" ./scripts/restore.sh "$DUMP" >"$RESTORE_LOG" 2>&1
 rc=$?
 check "restauración (rc)" 0 "$rc"
 check "dato previo presente" 1 "$(q "SELECT count(*) FROM app.gerencia WHERE codigo='RESTORE-A'")"
 check "dato posterior ausente" 0 "$(q "SELECT count(*) FROM app.gerencia WHERE codigo='RESTORE-B'")"
 check "cadena de auditoría íntegra" 1 "$(grep -c "íntegra" "$RESTORE_LOG")"
-check "restauración registrada" 1 "$(q "SELECT count(*) FROM ops.registro_respaldo WHERE tipo='RESTAURACION'")"
-check "restauración auditada" 1 "$(q "SELECT count(*) FROM audit.evento WHERE accion='OPS_RESTORE_EXECUTED'")"
+check "restauración registrada" 1 "$(q "SELECT count(*) FROM ops.registro_respaldo WHERE tipo='RESTAURACION' AND inicio >= '$T0'")"
+check "restauración auditada" 1 "$(q "SELECT count(*) FROM audit.evento WHERE accion='OPS_RESTORE_EXECUTED' AND ocurrido_en >= '$T0'")"
 check "backend healthy tras restaurar" healthy "$(docker inspect -f '{{.State.Health.Status}}' "$(dc ps -q backend)")"
 exit $fail
