@@ -2,8 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
+    branches: [main, develop]
 
 permissions:
   contents: read
@@ -18,7 +19,7 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -r requirements-dev.txt
       - run: ruff check app tests
-      - run: pytest
+      - run: pytest -m "not integration"
 
   frontend:
     runs-on: ubuntu-latest
@@ -31,6 +32,19 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+  security:
+    # Auditoría de dependencias con vulnerabilidades conocidas (REQ-RNF-01, Fase 10).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install pip-audit==2.7.3 && pip-audit -r backend/requirements.txt
+      - uses: actions/setup-node@v4
+        with: { node-version: "22", cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci && npm audit --audit-level=high
+        working-directory: frontend
+
   stack:
     runs-on: ubuntu-latest
     needs: [backend, frontend]
@@ -39,7 +53,25 @@ jobs:
       - run: ./scripts/init-env.sh
       - run: docker compose up -d --build --wait
       - run: ./scripts/smoke.sh
+      - run: make test-int
+      - run: docker compose exec -T backend python -m app.cli audit-verify
       - if: failure()
         run: docker compose logs --no-color
       - if: always()
-        run: docker compose down -v
+        run: |
+          docker compose down -v
+          docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml down -v
+
+  e2e-and-backups:
+    # E2E de navegador (Playwright en contenedor) y prueba de rotación/restauración de respaldos.
+    runs-on: ubuntu-latest
+    needs: [stack]
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/init-env.sh
+      - run: make test-e2e
+      - run: make test-backups
+      - if: failure()
+        run: docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml logs --no-color
+      - if: always()
+        run: docker compose -p secureone_test -f docker-compose.yml -f docker-compose.test.yml down -v

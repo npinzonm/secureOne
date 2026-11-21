@@ -1,16 +1,20 @@
 """Health checks (Fase 1).
 
 - live: el proceso responde.
-- ready: PostgreSQL y Redis alcanzables. Nginx lo bloquea desde fuera; lo usan
+- ready: PostgreSQL, Redis y migraciones en head. Nginx lo bloquea desde fuera; lo usan
   Docker y la red interna. No expone detalles de error (solo ok/fail por dependencia).
 """
 
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
+from pathlib import Path
 
 import psycopg
 import redis.asyncio as aioredis
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from fastapi import APIRouter, Depends, Response, status
 
 from app.core.config import Settings, get_settings
@@ -48,8 +52,29 @@ async def check_redis(settings: Settings) -> None:
         await client.aclose()
 
 
+@lru_cache
+def migrations_head() -> str | None:
+    ini = Path(__file__).resolve().parents[2] / "alembic.ini"
+    return ScriptDirectory.from_config(Config(str(ini))).get_current_head()
+
+
+async def check_migrations(settings: Settings) -> None:
+    """La BD debe estar exactamente en la revisión head del código desplegado."""
+    conn = await psycopg.AsyncConnection.connect(
+        settings.postgres_dsn, connect_timeout=max(1, int(settings.health_timeout_seconds))
+    )
+    try:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT version_num FROM public.alembic_version")
+            row = await cur.fetchone()
+    finally:
+        await conn.close()
+    if row is None or row[0] != migrations_head():
+        raise RuntimeError("migrations not at head")
+
+
 def get_checks() -> dict[str, Check]:
-    return {"postgres": check_postgres, "redis": check_redis}
+    return {"postgres": check_postgres, "redis": check_redis, "migrations": check_migrations}
 
 
 @router.get("/live")

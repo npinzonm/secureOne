@@ -3,6 +3,20 @@
 > Cada decisión lleva una recomendación. **Ninguna está aprobada** hasta que el responsable la valide.
 > **Bloquea** = fase o funcionalidad que no se implementa sin la respuesta. Si dice "no bloquea", se implementará la recomendación como PROPUESTA, de forma reversible, salvo indicación contraria.
 
+## Registro de decisiones aprobadas
+
+| ID | Decisión aprobada | Fecha | Aprobó |
+|---|---|---|---|
+| PD-01 | Access JWT de 5 min con `sid`; sesión viva en Redis con TTL deslizante de 15 min; una sesión por usuario; refresh opaco rotativo con hash en PostgreSQL y detección de reutilización; Redis caído → 503. | 2026-11-09 | Responsable del proyecto (chat) |
+| PD-04 | Fail-closed para toda mutación, todo evento de autenticación (incluido el login), consultas sensibles y exportaciones. Sin auditoría, nadie inicia sesión. | 2026-11-09 | Responsable del proyecto (chat) |
+| PD-06 | Perfil de sistema protegido `ADMINISTRADOR` con rol que contiene todos los permisos `ADM.*`; máximo 2 usuarios activos. | 2026-11-09 | Responsable del proyecto (chat) |
+| PD-05 | Matriz de operaciones de [ESP-APR §2](especificaciones/ESP-APR.md#2-matriz-de-operaciones-propuesta--pd-05). **Con aprobación:** alta, modificación agrupada de datos, cambio de perfil, asignación/revocación de módulos, inhabilitación manual y reactivación de usuarios; inhabilitación por retiro TH. **Directas:** orden de módulos, contraseña temporal, revocación de sesión, gestión de perfiles/roles/permisos/módulos con impacto previo, dominios, parámetros, estado de atención de errores y carga de archivo TH. | 2026-11-10 | Responsable del proyecto (chat) |
+| PD-17 | Mensaje genérico «Usuario o contraseña inválidos» para cualquier fallo; mensaje específico solo para el bloqueo temporal, sin indicar minutos. | 2026-11-09 | Responsable del proyecto (chat) |
+
+Las secciones de estas decisiones más abajo se conservan como justificación; su estado es **APROBADO**.
+
+**Definidas por delegación (2026-11-10):** PD-07, PD-08, PD-09, PD-10, PD-11 y PD-22 → ver [06-definiciones-delegadas.md](06-definiciones-delegadas.md) (DD-01..DD-07). Son vinculantes para v1.0, pero deben revisarse con el contrato real de TH y con una especificación UX cuando existan.
+
 ## Resumen y prioridad de respuesta
 
 | ID | Tema | Bloquea | Prioridad de respuesta |
@@ -139,6 +153,8 @@ Se necesita para la planta activa y la de retirados:
 - **Necesito confirmación** (P §15 marca los mensajes como pendientes).
 
 ### PD-18 · Almacenamiento del token en el navegador
+> **Implementado en la Fase 3 (PROPUESTO, reversible):** la alternativa con access token en memoria (cabecera `Authorization: Bearer`) y refresh en cookie `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`. Motivo: elimina el CSRF en todas las rutas salvo el refresh, que queda protegido por SameSite=Strict, sin añadir un mecanismo de token CSRF.
+
 - **Recomendación:** cookies `HttpOnly` + `Secure` + `SameSite=Strict` emitidas por el backend detrás de Nginx (mismo origen), con token CSRF de doble envío.
 - **Alternativa:** token en memoria + refresh en cookie.
 
