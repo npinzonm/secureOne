@@ -1,5 +1,5 @@
 # Dependencias de ejecución (versiones fijadas).
-fastapi==0.162.0
+fastapi==0.163.2
 starlette==1.10.0  # fijada: corrige 7 vulnerabilidades (Fase 10)
 uvicorn[standard]==0.34.0
 pydantic-settings==2.7.1
